@@ -1,0 +1,6 @@
+{
+  "name": "Hailemariam Mamo Secondary School",
+  "description": "Official portal and academic management system for Hailemariam Mamo Secondary and Preparatory School (Grades 9-12) in Debre Berhan, Ethiopia. Featuring dynamic student grade tracking, event calendar, teacher-student communication board, and ESSLCE exam hub.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
