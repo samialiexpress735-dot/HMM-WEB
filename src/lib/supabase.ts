@@ -634,3 +634,167 @@ export async function syncTimetableSlotToCloud(slot: TimetableSlot): Promise<boo
     return false;
   }
 }
+
+// ==============================================================================
+// 5. ACTIVE STUDENTS & MARKS CLOUD SYNC
+// ==============================================================================
+
+export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data: studentsData, error: sErr } = await client.from('students').select('*').order('student_id');
+    if (sErr || !studentsData || studentsData.length === 0) return null;
+
+    const { data: marksData } = await client.from('student_marks').select('*');
+
+    // Group marks by student_id and semester
+    const marksByStudent = new Map<string, { [semester: number]: any[] }>();
+    if (marksData) {
+      marksData.forEach((m: any) => {
+        if (!marksByStudent.has(m.student_id)) {
+          marksByStudent.set(m.student_id, { 1: [], 2: [] });
+        }
+        const studentSemesters = marksByStudent.get(m.student_id)!;
+        const sem = Number(m.semester) || 1;
+        if (!studentSemesters[sem]) studentSemesters[sem] = [];
+        studentSemesters[sem].push({
+          subjectId: m.subject_id,
+          subjectName: m.subject_name,
+          subjectAmharic: m.subject_amharic || m.subject_name,
+          teacherName: m.teacher_name || 'Faculty',
+          continuousAssessment: Number(m.continuous_assessment || 0),
+          midExam: Number(m.mid_exam || 0),
+          finalExam: Number(m.final_exam || 0)
+        });
+      });
+    }
+
+    return studentsData.map((s: any): Student => {
+      const studentMarks = marksByStudent.get(s.student_id) || { 1: [], 2: [] };
+      return {
+        id: s.id,
+        studentId: s.student_id,
+        fullName: s.full_name,
+        fullNameAmharic: s.full_name_amharic || s.full_name,
+        gender: s.gender || 'M',
+        grade: Number(s.grade),
+        section: s.section,
+        stream: s.stream,
+        academicYear: s.academic_year || '2024/2025 (2017 ዓ.ም.)',
+        rank: Number(s.rank || 1),
+        totalStudentsInSection: Number(s.total_students_in_section || 40),
+        attendanceRate: Number(s.attendance_rate || 95),
+        conduct: s.conduct || 'A',
+        homeroomTeacher: s.homeroom_teacher || 'Assigned in Grades of This Year',
+        guardianName: s.guardian_name || 'Parent / Guardian',
+        guardianPhone: s.guardian_phone || '',
+        avatar: s.avatar || '',
+        semesters: [
+          {
+            semester: 1,
+            subjects: studentMarks[1]?.length > 0 ? studentMarks[1] : []
+          },
+          {
+            semester: 2,
+            subjects: studentMarks[2]?.length > 0 ? studentMarks[2] : []
+          }
+        ]
+      };
+    });
+  } catch (e) {
+    console.warn('Error fetching active students from cloud:', e);
+    return null;
+  }
+}
+
+export async function syncActiveStudentToCloud(student: Student): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    // 1. Upsert student basic profile
+    const { error: sErr } = await client.from('students').upsert({
+      id: student.id,
+      student_id: student.studentId,
+      full_name: student.fullName,
+      full_name_amharic: student.fullNameAmharic || null,
+      gender: student.gender,
+      grade: student.grade,
+      section: student.section,
+      stream: student.stream || null,
+      academic_year: student.academicYear,
+      rank: student.rank,
+      attendance_rate: student.attendanceRate,
+      conduct: student.conduct || 'A',
+      homeroom_teacher: student.homeroomTeacher,
+      guardian_name: student.guardianName,
+      guardian_phone: student.guardianPhone,
+      avatar: student.avatar || '',
+      created_at: new Date().toISOString()
+    });
+
+    if (sErr) {
+      console.warn('Student upsert error:', sErr);
+      return false;
+    }
+
+    // 2. Upsert semester marks
+    if (student.semesters && student.semesters.length > 0) {
+      const marksPayload: any[] = [];
+      student.semesters.forEach((sem) => {
+        sem.subjects?.forEach((sub) => {
+          marksPayload.push({
+            student_id: student.studentId,
+            subject_id: sub.subjectId,
+            subject_name: sub.subjectName,
+            semester: sem.semester,
+            continuous_assessment: sub.continuousAssessment,
+            mid_exam: sub.midExam,
+            final_exam: sub.finalExam,
+            updated_at: new Date().toISOString()
+          });
+        });
+      });
+
+      if (marksPayload.length > 0) {
+        await client.from('student_marks').upsert(marksPayload, {
+          onConflict: 'student_id,subject_id,semester'
+        });
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('Error syncing active student to cloud:', err);
+    return false;
+  }
+}
+
+/**
+ * Universal Real-Time WebSocket Channel
+ * Listens to all tables across all school departments and triggers sync callback instantly.
+ */
+export function subscribeToAllSchoolDataRealtime(onSyncRequired: () => void): () => void {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+
+  try {
+    const channel = client
+      .channel('realtime:school-master')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'grade_sections' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_marks' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_slots' }, () => onSyncRequired())
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  } catch (err) {
+    console.warn('Realtime subscription error:', err);
+    return () => {};
+  }
+}
+

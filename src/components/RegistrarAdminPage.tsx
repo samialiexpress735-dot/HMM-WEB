@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UserPlus,
   Search,
@@ -59,6 +59,7 @@ import {
   CTE_SPECIALIZATION_OPTIONS,
   CTESpecialization
 } from '../data/schoolData';
+import { syncStudentToCloud, syncTimetableSlotToCloud } from '../lib/supabase';
 
 interface RegistrarAdminPageProps {
   teachers: Teacher[];
@@ -83,9 +84,43 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
   // Archive & 2019 Registrations state
   const [archiveStudents] = useState<ArchiveStudent[]>(PREVIOUS_YEAR_ARCHIVE_STUDENTS);
-  const [registeredStudents, setRegisteredStudents] = useState<RegisteredStudent2019[]>(
-    INITIAL_REGISTERED_2019_STUDENTS
-  );
+  const [registeredStudents, setRegisteredStudents] = useState<RegisteredStudent2019[]>(() => {
+    try {
+      const saved = localStorage.getItem('hmm_persisted_registered_students');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return INITIAL_REGISTERED_2019_STUDENTS;
+  });
+
+  // Timetable & Conflict Detection State
+  const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>(() => {
+    try {
+      const saved = localStorage.getItem('hmm_persisted_timetable_slots');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return INITIAL_TIMETABLE_SLOTS;
+  });
+
+  // Sync registered intake & timetable to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('hmm_persisted_registered_students', JSON.stringify(registeredStudents));
+    } catch {
+      // ignore
+    }
+  }, [registeredStudents]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('hmm_persisted_timetable_slots', JSON.stringify(timetableSlots));
+    } catch {
+      // ignore
+    }
+  }, [timetableSlots]);
 
   // Registration Form State
   const [targetGrade, setTargetGrade] = useState<number>(9);
@@ -116,9 +151,15 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [previewBuckets, setPreviewBuckets] = useState<SectionAllocationBucket[] | null>(null);
   const [previewSearchQuery, setPreviewSearchQuery] = useState<string>('');
   const [allocationSuccessMessage, setAllocationSuccessMessage] = useState<string>('');
+  const [hasCommittedCurrentPreview, setHasCommittedCurrentPreview] = useState<boolean>(false);
+  const [showCommitSuccessModal, setShowCommitSuccessModal] = useState<boolean>(false);
+  const [lastCommittedSectionsInfo, setLastCommittedSectionsInfo] = useState<{
+    codes: string[];
+    count: number;
+    studentCount: number;
+  } | null>(null);
 
   // Timetable & Conflict Detection State
-  const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>(INITIAL_TIMETABLE_SLOTS);
   const [selectedTimetableSection, setSelectedTimetableSection] = useState<string>('9B');
   const [isSlotModalOpen, setIsSlotModalOpen] = useState<boolean>(false);
   const [editingSlot, setEditingSlot] = useState<Partial<TimetableSlot> | null>(null);
@@ -188,6 +229,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     };
 
     setRegisteredStudents((prev) => [newStudent, ...prev]);
+    syncStudentToCloud(newStudent).catch(() => {});
 
     // Reset fields
     setFullName('');
@@ -247,6 +289,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     const buckets = allocateStudentsToSections(candidates, options);
     setPreviewBuckets(buckets);
     setAllocationSuccessMessage('');
+    setHasCommittedCurrentPreview(false);
+    setShowCommitSuccessModal(false);
   };
 
   // Move Student from one preview section to another
@@ -273,6 +317,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Confirm and Commit New Sections
   const handleCommitSections = () => {
     if (!previewBuckets || previewBuckets.length === 0) return;
+
+    if (hasCommittedCurrentPreview) {
+      setShowCommitSuccessModal(true);
+      return;
+    }
 
     // Create GradeSection objects with empty assigned teachers as requested
     const newGradeSections: GradeSection[] = previewBuckets.map((bucket, idx) => {
@@ -393,6 +442,14 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               ', '
             )}) with room assignments and merit/gender balancing! Assigned teachers are initially empty. You can now configure period schedules below without clashing periods.`
     );
+
+    setHasCommittedCurrentPreview(true);
+    setLastCommittedSectionsInfo({
+      codes: previewBuckets.map((b) => b.sectionCode),
+      count: previewBuckets.length,
+      studentCount: previewBuckets.reduce((acc, b) => acc + b.students.length, 0)
+    });
+    setShowCommitSuccessModal(true);
   };
 
   // Open Timetable Assignment Modal
@@ -502,6 +559,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       );
       return [...filtered, newSlot];
     });
+
+    syncTimetableSlotToCloud(newSlot).catch(() => {});
 
     setIsSlotModalOpen(false);
   };
@@ -1330,14 +1389,25 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <span>Export Rosters (CSV)</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={handleCommitSections}
-                    className="btn-animated px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-950" />
-                    <span>Confirm & Commit 2019 Sections</span>
-                  </button>
+                  {hasCommittedCurrentPreview ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowCommitSuccessModal(true)}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5 transition-all"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                      <span>{lang === 'am' ? '✓ ክፍሎች ተመዝግበዋል (ዝርዝር እይ)' : '✓ Sections Committed (View Details)'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleCommitSections}
+                      className="btn-animated px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-950" />
+                      <span>{lang === 'am' ? 'ክፍሎችን አፅድቅና መዝግብ' : 'Confirm & Commit 2019 Sections'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1743,6 +1813,125 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Immediate Commit Confirmation Modal */}
+      {showCommitSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-emerald-100 overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header banner */}
+            <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-slate-900 p-6 text-white relative">
+              <button
+                type="button"
+                onClick={() => setShowCommitSuccessModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full text-slate-300 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-amber-300 shadow-inner">
+                  <CheckCircle2 className="w-7 h-7" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                    2019 E.C. Academic Registry
+                  </span>
+                  <h3 className="text-xl font-black text-white mt-1">
+                    {lang === 'am' ? 'ክፍሎች በተሳካ ሁኔታ ተመዝግበዋል!' : 'Sections Successfully Committed!'}
+                  </h3>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900 text-xs leading-relaxed space-y-2">
+                <p className="font-bold">
+                  {lang === 'am'
+                    ? `የ2019 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
+                    : `Successfully recorded ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} sections (${(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).join(', ')}) into the school active roster.`}
+                </p>
+                <p className="text-emerald-700 text-[11px]">
+                  {lang === 'am'
+                    ? 'የክፍል ድግግሞሽ (Duplicate Sections) መከላከያ ስርዓት ገብሯል፤ በአጋጣሚ ደጋግመው ቢጫኑም አላስፈላጊ ተመሳሳይ ክፍሎች አይፈጠሩም።'
+                    : 'Section deduplication safety is active: pressing confirm multiple times will not create duplicate sections.'}
+                </p>
+              </div>
+
+              {/* Created Sections List */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
+                  {lang === 'am' ? 'የተመዘገቡ ክፍሎች ኮዶች' : 'Active Section Codes Registered'}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).map((code) => (
+                    <span
+                      key={code}
+                      className="px-3 py-1.5 bg-slate-900 text-amber-400 font-mono font-black text-xs rounded-xl shadow-xs border border-slate-700 flex items-center gap-1.5"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Section {code}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Next Steps Guidance */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">
+                  {lang === 'am' ? 'ቀጣይ እርምጃዎች' : 'Next Recommended Actions'}
+                </span>
+                <p className="text-xs text-slate-600">
+                  {lang === 'am'
+                    ? '1. በ"Grades of This Year" ገጽ ላይ የክፍል መምህራንን (Homeroom & Subject Teachers) ይመድቡ።'
+                    : '1. In "Grades of This Year", assign certified subject teachers & homeroom advisors.'}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {lang === 'am'
+                    ? '2. በ"Timetable & Rooms" ታብ ላይ የክፍለ ጊዜያት ግጭት ሳይኖር የሰሌዳ ፕሮግራም ያዘጋጁ።'
+                    : '2. In the "Timetable & Rooms" tab, arrange clash-free weekly period schedules.'}
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2 border-t border-slate-100">
+                {onNavigateToGrades && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCommitSuccessModal(false);
+                      onNavigateToGrades();
+                    }}
+                    className="w-full sm:w-auto flex-1 btn-animated px-4 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4 text-amber-300" />
+                    <span>{lang === 'am' ? 'ወደ ክፍሎች አስተዳደር ሂድ →' : 'View in Grades of This Year →'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCommitSuccessModal(false);
+                    setActiveTab('timetable');
+                  }}
+                  className="w-full sm:w-auto btn-animated px-4 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Clock className="w-4 h-4 text-emerald-950" />
+                  <span>{lang === 'am' ? 'የሰሌዳ ፕሮግራም አዘጋጅ' : 'Schedule Timetable'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCommitSuccessModal(false)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  {lang === 'am' ? 'ዝጋ' : 'Close'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

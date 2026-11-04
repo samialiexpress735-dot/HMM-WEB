@@ -35,8 +35,11 @@ import {
   fetchTeachersFromCloud,
   syncTeacherToCloud,
   deleteTeacherFromCloud,
-  subscribeToTeachersRealtime,
   fetchSectionsFromCloud,
+  syncSectionToCloud,
+  fetchStudentsFromCloud,
+  syncActiveStudentToCloud,
+  subscribeToAllSchoolDataRealtime,
   isSupabaseConfigured
 } from './lib/supabase';
 
@@ -96,7 +99,16 @@ export default function App() {
   const [sections, setSections] = useState<GradeSection[]>(() => {
     try {
       const saved = localStorage.getItem('hmm_persisted_sections');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: GradeSection[] = JSON.parse(saved);
+        const seen = new Set<string>();
+        return parsed.filter((s) => {
+          const key = (s.section || '').toUpperCase().trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
     } catch {
       // ignore
     }
@@ -201,22 +213,26 @@ export default function App() {
       if (isSupabaseConfigured()) {
         try {
           const cloudTeachers = await fetchTeachersFromCloud();
-          if (cloudTeachers !== null) {
+          if (cloudTeachers !== null && cloudTeachers.length > 0) {
             setTeachers(cloudTeachers);
           }
           const cloudSections = await fetchSectionsFromCloud();
           if (cloudSections && cloudSections.length > 0) {
             setSections(cloudSections);
           }
+          const cloudStudents = await fetchStudentsFromCloud();
+          if (cloudStudents && cloudStudents.length > 0) {
+            setStudents(cloudStudents);
+          }
         } catch (e) {
-          console.warn('Background sync error:', e);
+          console.warn('Background cloud sync error:', e);
         }
       }
     }
     loadCloudData();
 
-    // Realtime background sync - instant updates like Uber & Amazon without manual refresh
-    const unsubscribe = subscribeToTeachersRealtime(() => {
+    // Realtime background sync across all devices via WebSockets
+    const unsubscribe = subscribeToAllSchoolDataRealtime(() => {
       loadCloudData();
     });
 
@@ -295,6 +311,7 @@ export default function App() {
 
   const handleAddTeacher = (newTeacher: Teacher) => {
     setTeachers((prev) => [newTeacher, ...prev.filter((t) => t.id !== newTeacher.id)]);
+    syncTeacherToCloud(newTeacher).catch(() => {});
   };
 
   const handleDeleteTeacher = async (teacherId: string) => {
@@ -308,10 +325,30 @@ export default function App() {
 
   const handleUpdateSection = (updated: GradeSection) => {
     setSections((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    syncSectionToCloud(updated).catch(() => {});
   };
 
   const handleAddSections = (newSections: GradeSection[]) => {
-    setSections((prev) => [...newSections, ...prev]);
+    setSections((prev) => {
+      const incomingCodes = new Set(newSections.map((s) => s.section.toUpperCase().trim()));
+      const remainingPrev = prev.filter((s) => !incomingCodes.has(s.section.toUpperCase().trim()));
+      return [...newSections, ...remainingPrev];
+    });
+    newSections.forEach((sec) => {
+      syncSectionToCloud(sec).catch(() => {});
+    });
+  };
+
+  const handleUpdateStudents = (updatedStudents: Student[] | ((prev: Student[]) => Student[])) => {
+    setStudents((prev) => {
+      const next = typeof updatedStudents === 'function' ? updatedStudents(prev) : updatedStudents;
+      if (isSupabaseConfigured()) {
+        next.slice(0, 25).forEach((st) => {
+          syncActiveStudentToCloud(st).catch(() => {});
+        });
+      }
+      return next;
+    });
   };
 
   const handleNavigateToTeacherPortal = (sectionCode?: string, subjectId?: string) => {
@@ -349,7 +386,7 @@ export default function App() {
               onAddTeacher={handleAddTeacher}
               onDeleteTeacher={handleDeleteTeacher}
               students={students}
-              onUpdateStudents={setStudents}
+              onUpdateStudents={handleUpdateStudents}
               sections={sections}
               events={events}
               onAddEvent={handleAddEvent}
@@ -380,7 +417,7 @@ export default function App() {
               teachers={teachers}
               sections={sections}
               onAddSections={handleAddSections}
-              onUpdateStudents={setStudents}
+              onUpdateStudents={handleUpdateStudents}
               lang={lang}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToTeacher={handleNavigateToTeacherPortal}
@@ -416,7 +453,7 @@ export default function App() {
             onUpdateSection={handleUpdateSection}
             teachers={teachers}
             students={students}
-            onUpdateStudents={setStudents}
+            onUpdateStudents={handleUpdateStudents}
             lang={lang}
             onNavigateToTeacherPortal={handleNavigateToTeacherPortal}
             onNavigateToGradePortal={() => setCurrentTab('portal')}
@@ -426,7 +463,7 @@ export default function App() {
         {currentTab === 'teacher' && (
           <TeacherPortal
             students={students}
-            onUpdateStudents={setStudents}
+            onUpdateStudents={handleUpdateStudents}
             teachers={teachers}
             lang={lang}
             initialSection={activeTeacherSection}

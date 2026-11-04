@@ -23,7 +23,9 @@ import {
   User,
   SlidersHorizontal,
   ChevronDown,
-  Save
+  Save,
+  Printer,
+  AlertTriangle
 } from 'lucide-react';
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
@@ -37,6 +39,44 @@ interface GradesOfYearPageProps {
   lang: 'en' | 'am';
   onNavigateToTeacherPortal?: (sectionCode?: string, subjectId?: string) => void;
   onNavigateToGradePortal?: () => void;
+}
+
+export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string): boolean {
+  const tSub = (teacher.subject || '').toLowerCase().trim();
+  const sId = (subjectId || '').toLowerCase().trim();
+  const sName = (subjectName || '').toLowerCase().trim();
+
+  const subjectKeywords: Record<string, string[]> = {
+    math: ['math', 'ሒሳብ', 'mathematics'],
+    phys: ['phys', 'ፊዚክስ', 'physics'],
+    chem: ['chem', 'ኬሚስትሪ', 'chemistry'],
+    bio: ['bio', 'ባዮሎጂ', 'biology'],
+    eng: ['eng', 'እንግሊዝኛ', 'english'],
+    amh: ['amh', 'አማርኛ', 'amharic'],
+    geo: ['geo', 'ጂኦግራፊ', 'geography'],
+    hist: ['hist', 'ታሪክ', 'history'],
+    civ: ['civ', 'ስነ-ዜጋ', 'civics', 'citizenship'],
+    it: ['it', 'ict', 'ኢንፎርሜሽን', 'computer', 'information technology'],
+    pe: ['pe', 'sport', 'ስፖርት', 'physical education'],
+    econ: ['econ', 'ኢኮኖሚክስ', 'economics'],
+    agri: ['agri', 'ግብርና', 'agriculture'],
+    cte: ['cte', 'ስራና ቴክኒክ', 'career', 'technical']
+  };
+
+  let matchedKey = '';
+  for (const [key, keywords] of Object.entries(subjectKeywords)) {
+    if (keywords.some((kw) => sId.includes(kw) || sName.includes(kw))) {
+      matchedKey = key;
+      break;
+    }
+  }
+
+  if (matchedKey) {
+    const validKeywords = subjectKeywords[matchedKey];
+    return validKeywords.some((kw) => tSub.includes(kw));
+  }
+
+  return tSub.includes(sId) || sName.includes(tSub);
 }
 
 export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
@@ -548,15 +588,16 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                         <span>{lang === 'am' ? 'የተረጋገጠ የክፍል መምህር' : 'Verified Homeroom Faculty'}</span>
                       </span>
-                      {onNavigateToTeacherPortal && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigateToTeacherPortal(sec.section, sec.homeroomTeacher.subject.toLowerCase().slice(0, 4))}
-                          className="font-bold text-emerald-900 hover:text-emerald-950 flex items-center gap-0.5 hover:underline cursor-pointer"
-                        >
-                          <span>{lang === 'am' ? 'የመምህራን ዴስክ →' : 'Faculty Desk →'}</span>
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReassignModalSection(sec);
+                          setSelectedHomeroomTeacherId(sec.homeroomTeacher.id || '');
+                        }}
+                        className="font-bold text-emerald-900 hover:text-emerald-950 flex items-center gap-0.5 hover:underline cursor-pointer"
+                      >
+                        <span>{lang === 'am' ? 'መምህር ቀይር →' : 'Change Teacher →'}</span>
+                      </button>
                     </div>
                   </div>
 
@@ -658,30 +699,18 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
-                  {/* View Students & Marks button */}
                   <button
                     onClick={() => {
                       setRosterModalSection(sec);
                       const roster = getStudentsForSection(sec);
                       setSelectedStudentForMarks(roster[0] || null);
                     }}
-                    className="btn-animated px-4 py-2 bg-white hover:bg-slate-100 text-slate-900 font-bold rounded-xl border border-slate-300 text-xs transition-colors cursor-pointer flex items-center gap-2 shadow-2xs"
+                    className="btn-animated px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm"
                   >
-                    <GraduationCap className="w-4 h-4 text-emerald-700" />
-                    <span>{lang === 'am' ? 'የተማሪዎች ዝርዝር እና ማርክ' : 'Open Section Students & Marks'}</span>
+                    <GraduationCap className="w-4 h-4 text-amber-300" />
+                    <span>{lang === 'am' ? `የክፍል ${sec.section} የተማሪዎች ዝርዝር እና ማርክ መመልከቻ` : `Open Section ${sec.section} Students & Marks Desk`}</span>
+                    <ChevronRight className="w-4 h-4" />
                   </button>
-
-                  {/* Section Teacher Suite Navigation */}
-                  {onNavigateToTeacherPortal && (
-                    <button
-                      onClick={() => onNavigateToTeacherPortal(sec.section, 'math')}
-                      className="btn-animated px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                    >
-                      <FileSpreadsheet className="w-4 h-4 text-amber-300" />
-                      <span>{lang === 'am' ? `የ${sec.section} ማርክ መዝገብ` : `Open ${sec.section} Marks`}</span>
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
@@ -797,19 +826,60 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex-1">
-                      <select
-                        value={sub.teacherId}
-                        onChange={(e) => handleSubjectTeacherDraftChange(sub.subjectId, e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-                      >
-                        <option value="">{lang === 'am' ? '-- መምህር አልተመደበም (Unassigned) --' : '-- Unassigned (መምህር አልተመደበም) --'}</option>
-                        {teachers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name} ({t.department} - {t.subject})
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex-1 space-y-1">
+                      {(() => {
+                        const qualifiedTeachers = teachers.filter((t) => isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName));
+                        const otherTeachers = teachers.filter((t) => !isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName));
+                        const currentAssignedTeacher = teachers.find((t) => t.id === sub.teacherId);
+                        const isCurrentMismatch = Boolean(currentAssignedTeacher && !isTeacherQualifiedForSubject(currentAssignedTeacher, sub.subjectId, sub.subjectName));
+
+                        return (
+                          <>
+                            <select
+                              value={sub.teacherId}
+                              onChange={(e) => handleSubjectTeacherDraftChange(sub.subjectId, e.target.value)}
+                              className={`w-full bg-slate-50 border rounded-xl px-3 py-2 text-slate-900 font-semibold focus:ring-2 focus:ring-emerald-500 cursor-pointer ${
+                                isCurrentMismatch ? 'border-rose-400 bg-rose-50/40 ring-1 ring-rose-400' : 'border-slate-300'
+                              }`}
+                            >
+                              <option value="">{lang === 'am' ? '-- መምህር አልተመደበም (Unassigned) --' : '-- Unassigned (መምህር አልተመደበም) --'}</option>
+                              {qualifiedTeachers.length > 0 ? (
+                                <optgroup label={lang === 'am' ? `የተረጋገጡ የ${sub.subjectName} መምህራን (${qualifiedTeachers.length})` : `Certified ${sub.subjectName} Specialists (${qualifiedTeachers.length})`}>
+                                  {qualifiedTeachers.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      ✓ {t.name} (Specialist: {t.subject} - {t.department})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ) : (
+                                <option disabled value="__none__">
+                                  ⚠️ {lang === 'am' ? `የ${sub.subjectName} የተረጋገጠ መምህር አልተገኘም (በStaff ገጽ ይመዝግቡ)` : `No certified ${sub.subjectName} teacher registered yet (Register in Staff Tab)`}
+                                </option>
+                              )}
+                              {otherTeachers.length > 0 && (
+                                <optgroup label={lang === 'am' ? 'ሌሎች መምህራን (የተለያየ የትምህርት ዘርፍ - የተከለከለ)' : 'Other Faculty (Blocked - Subject Mismatch)'}>
+                                  {otherTeachers.map((t) => (
+                                    <option key={t.id} value={t.id} disabled>
+                                      ⛔ {t.name} (Certified in {t.subject} - Not {sub.subjectName})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </select>
+
+                            {isCurrentMismatch && (
+                              <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-center gap-1.5 animate-in fade-in">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>
+                                  {lang === 'am'
+                                    ? `ማስጠንቀቂያ፡ ${currentAssignedTeacher?.name} የተመዘገቡት በ${currentAssignedTeacher?.subject} እንጂ በ${sub.subjectName} አይደለም!`
+                                    : `Subject Mismatch Block: ${currentAssignedTeacher?.name} is registered for ${currentAssignedTeacher?.subject}, not ${sub.subjectName}. Please select a certified specialist.`}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}
@@ -871,18 +941,17 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                 </div>
               </div>
 
-              {onNavigateToTeacherPortal && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setRosterModalSection(null);
-                    onNavigateToTeacherPortal(rosterModalSection.section, 'math');
-                  }}
-                  className="btn-animated px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer border border-slate-300 transition-colors"
+                  title="Print official section record and student mark roster"
                 >
-                  <FileSpreadsheet className="w-4 h-4 text-amber-300" />
-                  <span>{lang === 'am' ? `የ${rosterModalSection.section} ማርክ ሉህ ክፈት →` : `Open ${rosterModalSection.section} Sheet →`}</span>
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  <span>{lang === 'am' ? 'የክፍል ሪከርድ አትም' : 'Print Section Record'}</span>
                 </button>
-              )}
+              </div>
             </div>
 
             {/* Split View: Left Student Roster, Right Marks Card */}
