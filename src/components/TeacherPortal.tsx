@@ -23,7 +23,16 @@ import {
   Sparkles,
   Layers,
   Star,
-  Filter
+  Filter,
+  ArrowLeft,
+  Plus,
+  Trash2,
+  Edit2,
+  Settings2,
+  SlidersHorizontal,
+  Check,
+  X,
+  ChevronRight
 } from 'lucide-react';
 import {
   Student,
@@ -39,6 +48,20 @@ import {
   getTeacherRolesForSection,
   getStudentsForSection
 } from '../utils/sectionUtils';
+
+export interface AssessmentColumn {
+  id: string;
+  name: string;
+  maxScore: number;
+  isBonus?: boolean;
+}
+
+export const DEFAULT_ASSESSMENT_COLUMNS: AssessmentColumn[] = [
+  { id: 'quiz1', name: 'Quiz / Test', maxScore: 10, isBonus: false },
+  { id: 'assignment', name: 'Assignment / Practical', maxScore: 20, isBonus: false },
+  { id: 'mid', name: 'Midterm Exam', maxScore: 20, isBonus: false },
+  { id: 'final', name: 'Final Exam', maxScore: 50, isBonus: false }
+];
 
 interface TeacherPortalProps {
   students: Student[];
@@ -90,20 +113,21 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   const [sectionFilterMode, setSectionFilterMode] = useState<'assigned' | 'all'>('assigned');
 
-  // Class Management States
-  const [selectedSection, setSelectedSection] = useState<string>(() => {
-    if (activeTeacherUser) {
-      const assigned = getSectionsAssignedToTeacher(activeTeacherUser, sections);
-      if (assigned.length > 0) return assigned[0];
-    }
-    if (sections.length > 0) return sections[0].section;
-    return initialSection;
-  });
+  // Class Management States - null indicates teacher is on the Sections Hub
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(initialSubjectId);
   const [selectedSemester, setSelectedSemester] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<'marks' | 'attendance' | 'roster' | 'notices'>('marks');
   const [searchQuery, setSearchQuery] = useState('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+
+  // Customizable Assessment Columns state (teachers can add, edit, change max points and bonus)
+  const [assessmentColumns, setAssessmentColumns] = useState<AssessmentColumn[]>(DEFAULT_ASSESSMENT_COLUMNS);
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  const [colNameInput, setColNameInput] = useState('');
+  const [colMaxInput, setColMaxInput] = useState<number>(10);
+  const [colBonusInput, setColBonusInput] = useState(false);
 
   // Class Announcements state
   const [classNotices, setClassNotices] = useState<ClassAnnouncement[]>([
@@ -129,20 +153,113 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [newNoticeDueDate, setNewNoticeDueDate] = useState('');
   const [showNewNoticeForm, setShowNewNoticeForm] = useState(false);
 
-  // Sync section and subject when teacher or sections change
+  // Load custom columns whenever section, subject, or semester changes
   React.useEffect(() => {
-    if (activeTeacherUser) {
-      const assigned = getSectionsAssignedToTeacher(activeTeacherUser, sections);
-      if (assigned.length > 0) {
-        if (!selectedSection || !assigned.includes(selectedSection)) {
-          setSelectedSection(assigned[0]);
+    if (selectedSection && selectedSubjectId) {
+      const storageKey = `hmm_teacher_assessment_cols_${selectedSection}_${selectedSubjectId}_sem${selectedSemester}`;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAssessmentColumns(parsed);
+            return;
+          }
         }
-      } else if (sections.length > 0) {
-        if (!selectedSection || !sections.some((s) => s.section === selectedSection)) {
-          setSelectedSection(sections[0].section);
+      } catch {}
+      setAssessmentColumns(DEFAULT_ASSESSMENT_COLUMNS);
+    }
+  }, [selectedSection, selectedSubjectId, selectedSemester]);
+
+  const saveAssessmentColumns = (newCols: AssessmentColumn[]) => {
+    setAssessmentColumns(newCols);
+    if (selectedSection && selectedSubjectId) {
+      const storageKey = `hmm_teacher_assessment_cols_${selectedSection}_${selectedSubjectId}_sem${selectedSemester}`;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(newCols));
+      } catch {}
+    }
+  };
+
+  const handleOpenAddColumnModal = () => {
+    setEditingColumnId(null);
+    setColNameInput('');
+    setColMaxInput(10);
+    setColBonusInput(false);
+    setIsColumnModalOpen(true);
+  };
+
+  const handleOpenEditColumnModal = (col: AssessmentColumn) => {
+    setEditingColumnId(col.id);
+    setColNameInput(col.name);
+    setColMaxInput(col.maxScore);
+    setColBonusInput(Boolean(col.isBonus));
+    setIsColumnModalOpen(true);
+  };
+
+  const handleSaveColumnModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = colNameInput.trim() || 'Assessment Component';
+    const cleanMax = Math.max(1, Number(colMaxInput) || 10);
+
+    if (editingColumnId) {
+      const updated = assessmentColumns.map((c) =>
+        c.id === editingColumnId ? { ...c, name: cleanName, maxScore: cleanMax, isBonus: colBonusInput } : c
+      );
+      saveAssessmentColumns(updated);
+      setSaveSuccessMsg(`Column "${cleanName}" updated successfully!`);
+    } else {
+      const newCol: AssessmentColumn = {
+        id: `col_${Date.now()}`,
+        name: cleanName,
+        maxScore: cleanMax,
+        isBonus: colBonusInput
+      };
+      saveAssessmentColumns([...assessmentColumns, newCol]);
+      setSaveSuccessMsg(`New assessment column "${cleanName}" (${cleanMax} pts) added!`);
+    }
+
+    setIsColumnModalOpen(false);
+    setTimeout(() => setSaveSuccessMsg(''), 4000);
+  };
+
+  const handleDeleteColumn = (colId: string) => {
+    if (assessmentColumns.length <= 1) {
+      alert('You must keep at least one assessment column.');
+      return;
+    }
+    const target = assessmentColumns.find((c) => c.id === colId);
+    if (window.confirm(`Are you sure you want to remove column "${target?.name || ''}"?`)) {
+      const updated = assessmentColumns.filter((c) => c.id !== colId);
+      saveAssessmentColumns(updated);
+      setSaveSuccessMsg(`Column removed.`);
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    }
+  };
+
+  const handleEnterSection = (
+    sectionCode: string,
+    initialTab: 'marks' | 'attendance' | 'roster' | 'notices' = 'marks'
+  ) => {
+    setSelectedSection(sectionCode);
+    setActiveTab(initialTab);
+    const targetSec = sections.find((s) => (s.section || '').toUpperCase() === sectionCode.toUpperCase());
+    if (targetSec && activeTeacherUser) {
+      const roles = getTeacherRolesForSection(activeTeacherUser, targetSec);
+      if (roles.subjects.length > 0) {
+        const matchedSubObj = targetSec.subjectAssignments?.find(
+          (sa) => sa.teacherId === activeTeacherUser.id || sa.teacherName === activeTeacherUser.name
+        );
+        if (matchedSubObj) {
+          setSelectedSubjectId(matchedSubObj.subjectId);
         }
       }
+    }
+  };
 
+  // Sync subject when active teacher changes
+  React.useEffect(() => {
+    if (activeTeacherUser) {
       const subj = (activeTeacherUser.subject || '').toLowerCase();
       if (subj.includes('math')) setSelectedSubjectId('math');
       else if (subj.includes('phys')) setSelectedSubjectId('phys');
@@ -470,8 +587,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   // VIEW 2: LOGGED-IN TEACHER CLASS MANAGEMENT
   // ==========================================
 
-  // Filter students for the active class section accurately
+  // Filter students for the active class section accurately (returns empty array when on sections hub)
   const sectionStudents = React.useMemo(() => {
+    if (!selectedSection) return [];
     return getStudentsForSection(selectedSection, sections, students);
   }, [selectedSection, sections, students]);
 
@@ -489,17 +607,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   }, [sectionFilterMode, assignedSections, sections]);
 
   // Current active section object and subjects
-  const currentSectionObj = sections.find(
-    (s) => (s.section || '').toUpperCase() === selectedSection.toUpperCase()
-  );
+  const currentSectionObj = selectedSection
+    ? sections.find((s) => (s.section || '').toUpperCase() === selectedSection.toUpperCase())
+    : undefined;
 
   const availableSubjects = React.useMemo(() => {
     if (currentSectionObj?.subjectAssignments && currentSectionObj.subjectAssignments.length > 0) {
       return currentSectionObj.subjectAssignments;
     }
-    const gr = currentSectionObj?.grade || parseInt(selectedSection.replace(/\D/g, ''), 10) || 9;
+    const gr = currentSectionObj?.grade || (selectedSection ? parseInt(selectedSection.replace(/\D/g, ''), 10) : 9) || 9;
     if (gr >= 11) {
-      return currentSectionObj?.stream === 'Social Science' || selectedSection.includes('-Soc')
+      return currentSectionObj?.stream === 'Social Science' || (selectedSection && selectedSection.includes('-Soc'))
         ? STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
         : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
     }
@@ -520,58 +638,157 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       (s.fullNameAmharic && s.fullNameAmharic.includes(searchQuery))
   );
 
-  // Mark Score Handlers
-  const handleScoreChange = (
-    studentId: string,
-    field: 'continuousAssessment' | 'midExam' | 'finalExam',
-    value: number
-  ) => {
-    const updated = students.map((st) => {
-      if (st.id === studentId) {
-        const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
-        const existingSubject = semesterData?.subjects.find(
-          (s) =>
-            s.subjectId === selectedSubjectId ||
-            (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
-            (selectedSubjectId === 'ict' && s.subjectId === 'it')
-        );
+  // Helper to fetch student score for a custom assessment column
+  const getStudentColumnScore = (student: Student, colId: string): number => {
+    const semData = student.semesters.find((s) => s.semester === selectedSemester) || student.semesters[0];
+    const subject = semData?.subjects.find(
+      (s) =>
+        s.subjectId === selectedSubjectId ||
+        (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
+        (selectedSubjectId === 'ict' && s.subjectId === 'it')
+    );
 
-        let newSubjects;
-        if (existingSubject) {
-          newSubjects = semesterData.subjects.map((sub) =>
-            sub.subjectId === existingSubject.subjectId ? { ...sub, [field]: value } : sub
-          );
-        } else {
-          newSubjects = [
-            ...(semesterData?.subjects || []),
-            {
-              subjectId: selectedSubjectId,
-              subjectName: currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase(),
-              subjectAmharic: currentSubjectObj?.subjectAmharic || selectedSubjectId.toUpperCase(),
-              teacherName: activeTeacherUser?.name || 'Subject Teacher',
-              continuousAssessment: field === 'continuousAssessment' ? value : 0,
-              midExam: field === 'midExam' ? value : 0,
-              finalExam: field === 'finalExam' ? value : 0
-            }
-          ];
-        }
+    const customMap = (subject as any)?.customAssessments;
+    if (customMap && typeof customMap[colId] === 'number') {
+      return customMap[colId];
+    }
 
-        const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
-        let updatedSemesters;
-        if (hasSemester) {
-          updatedSemesters = st.semesters.map((sem) =>
-            sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem
-          );
-        } else {
-          updatedSemesters = [
-            ...st.semesters,
-            { semester: selectedSemester, subjects: newSubjects }
-          ];
-        }
-
-        return { ...st, semesters: updatedSemesters };
+    try {
+      const storageKey = `hmm_score_${student.id}_sem${selectedSemester}_${selectedSubjectId}_${colId}`;
+      const raw = localStorage.getItem(storageKey);
+      if (raw !== null && !isNaN(Number(raw))) {
+        return Number(raw);
       }
-      return st;
+    } catch {}
+
+    // Fallbacks to standard fields
+    if (colId === 'quiz1') {
+      return Math.min(10, Math.round((subject?.continuousAssessment ?? 0) * (10 / 30)));
+    }
+    if (colId === 'assignment') {
+      return Math.min(20, Math.round((subject?.continuousAssessment ?? 0) * (20 / 30)));
+    }
+    if (colId === 'mid') {
+      return subject?.midExam ?? 0;
+    }
+    if (colId === 'final') {
+      return subject?.finalExam ?? 0;
+    }
+
+    return 0;
+  };
+
+  // Dynamically compute total, letter grade, and pass/fail for a student across all active columns
+  const calculateStudentCustomSummary = (student: Student) => {
+    const regularCols = assessmentColumns.filter((c) => !c.isBonus);
+    const bonusCols = assessmentColumns.filter((c) => c.isBonus);
+    const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
+
+    const regularEarned = regularCols.reduce((sum, c) => sum + getStudentColumnScore(student, c.id), 0);
+    const bonusEarned = bonusCols.reduce((sum, c) => sum + getStudentColumnScore(student, c.id), 0);
+    const totalEarned = regularEarned + bonusEarned;
+
+    const percentage = maxPossible > 0 ? (totalEarned / maxPossible) * 100 : totalEarned;
+    const roundedPct = Math.round(percentage);
+    const letter = getEthiopianLetterGrade(roundedPct);
+    const status = percentage >= 50 ? 'Pass' : 'Fail';
+
+    return {
+      totalEarned,
+      maxPossible,
+      percentage: Math.round(percentage * 10) / 10,
+      letter,
+      status
+    };
+  };
+
+  // Customizable Mark Score Change Handler
+  const handleCustomScoreChange = (studentId: string, colId: string, rawVal: number) => {
+    const col = assessmentColumns.find((c) => c.id === colId);
+    const maxAllowed = col ? col.maxScore : 100;
+    const clamped = Math.max(0, Math.min(maxAllowed, Number(rawVal) || 0));
+
+    try {
+      const storageKey = `hmm_score_${studentId}_sem${selectedSemester}_${selectedSubjectId}_${colId}`;
+      localStorage.setItem(storageKey, String(clamped));
+    } catch {}
+
+    const updated = students.map((st) => {
+      if (st.id !== studentId) return st;
+
+      const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
+      const existingSubject = semesterData?.subjects.find(
+        (s) =>
+          s.subjectId === selectedSubjectId ||
+          (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
+          (selectedSubjectId === 'ict' && s.subjectId === 'it')
+      );
+
+      const existingCustom = (existingSubject as any)?.customAssessments || {};
+      const updatedCustom = { ...existingCustom, [colId]: clamped };
+
+      // Calculate new total and scale to standard fields
+      const regularCols = assessmentColumns.filter((c) => !c.isBonus);
+      const bonusCols = assessmentColumns.filter((c) => c.isBonus);
+      const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
+
+      const regScore = regularCols.reduce((sum, c) => {
+        const val = c.id === colId ? clamped : (updatedCustom[c.id] ?? getStudentColumnScore(st, c.id));
+        return sum + val;
+      }, 0);
+
+      const bonusScore = bonusCols.reduce((sum, c) => {
+        const val = c.id === colId ? clamped : (updatedCustom[c.id] ?? getStudentColumnScore(st, c.id));
+        return sum + val;
+      }, 0);
+
+      const totalEarned = regScore + bonusScore;
+      const percentage = maxPossible > 0 ? (totalEarned / maxPossible) * 100 : totalEarned;
+
+      const continuousScore = Math.min(30, Math.round((percentage * 0.3) * 10) / 10);
+      const midScore = Math.min(20, Math.round((percentage * 0.2) * 10) / 10);
+      const finalScore = Math.min(50, Math.round((percentage * 0.5) * 10) / 10);
+
+      let newSubjects;
+      if (existingSubject) {
+        newSubjects = semesterData.subjects.map((sub) =>
+          sub.subjectId === existingSubject.subjectId
+            ? {
+                ...sub,
+                continuousAssessment: continuousScore,
+                midExam: midScore,
+                finalExam: finalScore,
+                customAssessments: updatedCustom
+              }
+            : sub
+        );
+      } else {
+        newSubjects = [
+          ...(semesterData?.subjects || []),
+          {
+            subjectId: selectedSubjectId,
+            subjectName: currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase(),
+            subjectAmharic: currentSubjectObj?.subjectAmharic || selectedSubjectId.toUpperCase(),
+            teacherName: activeTeacherUser?.name || 'Subject Teacher',
+            continuousAssessment: continuousScore,
+            midExam: midScore,
+            finalExam: finalScore,
+            customAssessments: updatedCustom
+          }
+        ];
+      }
+
+      const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
+      let updatedSemesters;
+      if (hasSemester) {
+        updatedSemesters = st.semesters.map((sem) =>
+          sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem
+        );
+      } else {
+        updatedSemesters = [...st.semesters, { semester: selectedSemester, subjects: newSubjects }];
+      }
+
+      return { ...st, semesters: updatedSemesters };
     });
 
     onUpdateStudents(updated);
@@ -595,17 +812,20 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       return s;
     });
     onUpdateStudents(updated);
-    setSaveSuccessMsg(`All students in Section ${selectedSection} marked Present!`);
+    setSaveSuccessMsg(`All students in Section ${selectedSection || ''} marked Present!`);
     setTimeout(() => setSaveSuccessMsg(''), 3000);
   };
 
   const handleSaveMarks = () => {
-    setSaveSuccessMsg(`Marks successfully saved for Section ${selectedSection} (${selectedSubjectId.toUpperCase()})!`);
+    setSaveSuccessMsg(`Marks successfully saved for Section ${selectedSection || ''} (${selectedSubjectId.toUpperCase()})!`);
     setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
-  // Export to CSV Functionality
+  // Export to CSV Functionality with dynamic customizable assessment columns
   const handleExportCSV = () => {
+    const regularCols = assessmentColumns.filter((c) => !c.isBonus);
+    const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
+
     const headers = [
       '#',
       'Student ID',
@@ -614,27 +834,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       'Gender',
       'Grade',
       'Section',
-      'Continuous (30%)',
-      'Midterm (20%)',
-      'Final (50%)',
-      'Total (100%)',
+      ...assessmentColumns.map((c) => `"${c.name} (${c.maxScore}${c.isBonus ? ' Bonus' : ''})"`),
+      `"Total (${maxPossible})"`,
+      'Percentage (%)',
       'Letter Grade',
       'Status'
     ];
+
     const rows = filteredStudents.map((s, idx) => {
-      const semData = s.semesters.find((sem) => sem.semester === selectedSemester) || s.semesters[0];
-      const sub = semData?.subjects.find(
-        (subj) =>
-          subj.subjectId === selectedSubjectId ||
-          (selectedSubjectId === 'it' && subj.subjectId === 'ict') ||
-          (selectedSubjectId === 'ict' && subj.subjectId === 'it')
-      );
-      const continuous = sub?.continuousAssessment ?? 0;
-      const mid = sub?.midExam ?? 0;
-      const final = sub?.finalExam ?? 0;
-      const total = continuous + mid + final;
-      const letter = getEthiopianLetterGrade(total);
-      const status = total >= 50 ? 'Pass' : 'Fail';
+      const summary = calculateStudentCustomSummary(s);
+      const colScores = assessmentColumns.map((c) => getStudentColumnScore(s, c.id));
+
       return [
         idx + 1,
         `"${s.studentId}"`,
@@ -643,12 +853,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         `"${s.gender || 'M'}"`,
         s.grade,
         `"${s.section}"`,
-        continuous,
-        mid,
-        final,
-        total,
-        `"${letter}"`,
-        `"${status}"`
+        ...colScores,
+        summary.totalEarned,
+        summary.percentage,
+        `"${summary.letter.letter}"`,
+        `"${summary.status}"`
       ].join(',');
     });
 
@@ -657,7 +866,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `HMM_${selectedSection}_${selectedSubjectId.toUpperCase()}_Roster.csv`);
+    link.setAttribute('download', `HMM_${selectedSection || 'Class'}_${selectedSubjectId.toUpperCase()}_Roster.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -670,7 +879,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
     const notice: ClassAnnouncement = {
       id: `notice-${Date.now()}`,
-      section: selectedSection,
+      section: selectedSection || '',
       title: newNoticeTitle.trim(),
       content: newNoticeContent.trim(),
       date: new Date().toISOString().split('T')[0],
@@ -704,139 +913,262 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     ? Math.round((presentCount / sectionStudents.length) * 100)
     : 0;
 
-  return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* 1. TEACHER PROFILE & WORKSPACE HEADER */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-100">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-slate-900 text-amber-300 flex items-center justify-center font-bold text-lg border border-slate-700 shadow-sm shrink-0">
-              {activeTeacherUser.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-slate-900">{activeTeacherUser.name}</h2>
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {activeTeacherUser.subject}
-                </span>
+  // RENDER 1: SECTIONS HUB (Shown when teacher first logs in; no student list is shown yet)
+  if (!selectedSection) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300">
+        {/* Teacher Header Banner */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-xl bg-slate-900 text-amber-300 flex items-center justify-center font-bold text-lg border border-slate-700 shadow-sm shrink-0">
+                {activeTeacherUser.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {activeTeacherUser.department} • {activeTeacherUser.email || 'Faculty of Secondary Sciences'}
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-slate-900">{activeTeacherUser.name}</h2>
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    {activeTeacherUser.subject}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {activeTeacherUser.department} • {activeTeacherUser.email || 'Faculty of Secondary Sciences'}
+                </p>
+              </div>
+            </div>
+
+            {/* Action buttons & Sign Out */}
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-slate-500 hidden sm:block">
+                Role: <strong className="text-slate-800">Faculty Instructor</strong>
+              </div>
+              {onSignOutTeacher && (
+                <button
+                  onClick={onSignOutTeacher}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                  title="Sign out of Teacher Desk"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Sign Out</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Action buttons & Sign Out */}
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-slate-500 hidden sm:block">
-              Role: <strong className="text-slate-800">Faculty Instructor</strong>
+          {/* Welcome Title & Filter Toggle */}
+          <div className="pt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-emerald-700" />
+                <span>{lang === 'am' ? 'የተመደቡ ክፍሎች ዝርዝር' : 'My Assigned Classes & Sections'}</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {lang === 'am'
+                  ? 'ለመመዝገብ ወይም ማርክ ለማስገባት ከታች ካሉት ክፍሎች አንዱን ይምረጡ'
+                  : 'Select an assigned class section below to enter its workspace, record assessment marks, or manage attendance.'}
+              </p>
             </div>
-            {onSignOutTeacher && (
-              <button
-                onClick={onSignOutTeacher}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                title="Sign out of Teacher Desk"
-              >
-                <LogOut className="w-3.5 h-3.5 text-slate-500" />
-                <span>Sign Out</span>
-              </button>
+
+            {assignedSections.length > 0 && sections.length > assignedSections.length && (
+              <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSectionFilterMode('assigned')}
+                  className={`px-3 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    sectionFilterMode === 'assigned'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Assigned ({assignedSections.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSectionFilterMode('all')}
+                  className={`px-3 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                    sectionFilterMode === 'all'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  All School Sections ({sections.length})
+                </button>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Section Switcher & Semester Toggle */}
-        <div className="pt-5 space-y-3">
-          {assignedSections.length === 0 && (
-            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="font-bold">Notice:</span>
-                <span>You have not yet been assigned to a specific section by Admin in Grades of This Year. You may view and record marks for any school section below:</span>
-              </div>
-              <span className="text-[11px] font-semibold text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 shrink-0">
-                School-Wide Access
-              </span>
+        {assignedSections.length === 0 && (
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-4 py-3 rounded-xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="font-bold">Notice:</span>
+              <span>No section officially assigned to your profile by the Administrator yet. You can access and manage any active school section below:</span>
             </div>
-          )}
+            <span className="text-[11px] font-semibold text-amber-900 bg-amber-100 px-2.5 py-1 rounded border border-amber-200 shrink-0">
+              School-Wide Access
+            </span>
+          </div>
+        )}
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 mr-1">
-                <span className="text-xs font-bold text-slate-700">Class:</span>
-                {assignedSections.length > 0 && sections.length > assignedSections.length && (
-                  <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 text-[11px]">
+        {/* Grid of Sections Cards (No student names rendered on login) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {visibleSections.map((sec) => {
+            const targetSecObj = sections.find(
+              (s) => (s.section || '').toUpperCase() === sec.toUpperCase()
+            );
+            const roles = targetSecObj
+              ? getTeacherRolesForSection(activeTeacherUser, targetSecObj)
+              : { isHomeroom: false, subjects: [] };
+            const secStudents = getStudentsForSection(sec, sections, students);
+
+            return (
+              <div
+                key={sec}
+                className="bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-500 shadow-xs hover:shadow-md transition-all p-5 flex flex-col justify-between group"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-lg font-black text-slate-900 bg-slate-100 px-3 py-1 rounded-xl group-hover:bg-emerald-50 group-hover:text-emerald-900 transition-colors">
+                        Section {sec}
+                      </span>
+                      {roles.isHomeroom && (
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                          ★ Homeroom
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold text-slate-500 bg-slate-50 px-2 py-1 rounded-lg">
+                      Grade {targetSecObj?.grade || sec.replace(/\D/g, '') || 9}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs text-slate-600 mb-4">
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>
+                        Subject:{' '}
+                        <strong className="text-slate-800">
+                          {roles.subjects.length > 0 ? roles.subjects.join(', ') : activeTeacherUser.subject}
+                        </strong>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>
+                        Enrolled Students: <strong className="text-slate-800">{secStudents.length} Students</strong>
+                      </span>
+                    </div>
+                    {targetSecObj?.stream && (
+                      <div className="text-[11px] text-slate-500">
+                        Stream: <span className="font-semibold text-slate-700">{targetSecObj.stream}</span>
+                      </div>
+                    )}
+                    {targetSecObj?.shift && (
+                      <div className="text-[11px] text-slate-500">
+                        Shift: <span className="font-medium text-slate-700">{targetSecObj.shift}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEnterSection(sec, 'marks')}
+                    className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer hover:shadow"
+                  >
+                    <span>{lang === 'am' ? `ወደ ክፍል ${sec} ግባ` : `Enter Section ${sec} Workspace`}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <div className="grid grid-cols-3 gap-1.5 text-[11px]">
                     <button
                       type="button"
-                      onClick={() => setSectionFilterMode('assigned')}
-                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                        sectionFilterMode === 'assigned'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-900'
-                      }`}
+                      onClick={() => handleEnterSection(sec, 'marks')}
+                      className="py-1 px-1 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold rounded-lg text-center transition-colors cursor-pointer truncate"
+                      title="Open Gradebook"
                     >
-                      Assigned ({assignedSections.length})
+                      📝 Marks
                     </button>
                     <button
                       type="button"
-                      onClick={() => setSectionFilterMode('all')}
-                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                        sectionFilterMode === 'all'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-900'
-                      }`}
+                      onClick={() => handleEnterSection(sec, 'attendance')}
+                      className="py-1 px-1 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold rounded-lg text-center transition-colors cursor-pointer truncate"
+                      title="Open Attendance"
                     >
-                      All ({sections.length})
+                      📋 Attendance
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEnterSection(sec, 'roster')}
+                      className="py-1 px-1 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold rounded-lg text-center transition-colors cursor-pointer truncate"
+                      title="Open Roster"
+                    >
+                      👥 Roster
                     </button>
                   </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // RENDER 2: SECTION WORKSPACE (Shown when teacher enters into a specific section)
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* 1. SECTION WORKSPACE HEADER WITH BACK TO SECTIONS */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedSection(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              title="Return to sections list"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-600" />
+              <span>{lang === 'am' ? 'ወደ ክፍሎች ዝርዝር' : 'All Sections'}</span>
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black text-slate-900">Section {selectedSection}</h2>
+                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  {currentSubjectObj?.subjectName || activeTeacherUser.subject}
+                </span>
+                {currentSectionObj && getTeacherRolesForSection(activeTeacherUser, currentSectionObj).isHomeroom && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    ★ Homeroom Teacher
+                  </span>
                 )}
               </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Instructor: {activeTeacherUser.name} • {sectionStudents.length} Students Enrolled
+              </p>
+            </div>
+          </div>
 
-              {visibleSections.map((sec) => {
-                const targetSecObj = sections.find(
-                  (s) => (s.section || '').toUpperCase() === sec.toUpperCase()
-                );
-                const roles = targetSecObj
-                  ? getTeacherRolesForSection(activeTeacherUser, targetSecObj)
-                  : { isHomeroom: false, subjects: [] };
-
-                return (
-                  <button
-                    key={sec}
-                    onClick={() => setSelectedSection(sec)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                      selectedSection === sec
-                        ? 'bg-slate-900 text-white shadow-sm ring-2 ring-emerald-500/40'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <span>Section {sec}</span>
-                    {roles.isHomeroom && (
-                      <span
-                        className={`text-[9px] px-1 py-0.2 rounded font-bold ${
-                          selectedSection === sec
-                            ? 'bg-amber-400 text-amber-950'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                        title="You are the Homeroom Teacher for this section"
-                      >
-                        ★ Homeroom
-                      </span>
-                    )}
-                    {roles.subjects.length > 0 && !roles.isHomeroom && (
-                      <span
-                        className={`text-[9px] px-1 py-0.2 rounded font-medium ${
-                          selectedSection === sec
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {roles.subjects[0]}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+          <div className="flex items-center gap-3">
+            {/* Quick Switcher */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-600">
+              <span className="font-semibold hidden sm:inline">Switch Class:</span>
+              <select
+                value={selectedSection}
+                onChange={(e) => setSelectedSection(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-800 font-bold text-xs rounded-lg px-2.5 py-1.5 cursor-pointer"
+              >
+                {visibleSections.map((s) => (
+                  <option key={s} value={s}>
+                    Section {s}
+                  </option>
+                ))}
+              </select>
             </div>
 
+            {/* Semester Switcher */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
               <button
                 onClick={() => setSelectedSemester(1)}
@@ -855,6 +1187,17 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 Semester 2
               </button>
             </div>
+
+            {onSignOutTeacher && (
+              <button
+                onClick={onSignOutTeacher}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer ml-1"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -887,7 +1230,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         </div>
       </div>
 
-      {/* 3. FOUR CLASS MANAGEMENT MODES */}
+      {/* 3. CLASS MANAGEMENT TABS */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Navigation Tabs */}
         <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -932,28 +1275,28 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             >
               Homework & Bulletins
             </button>
+            <button
+              disabled
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap text-slate-400 bg-slate-100/50 cursor-not-allowed flex items-center gap-1"
+              title="Additional academic modules coming soon"
+            >
+              <span>+ More Tools (Coming Soon)</span>
+            </button>
           </div>
 
           {/* Action Tools */}
           <div className="flex items-center gap-2 flex-wrap">
             {activeTab === 'marks' && (
               <>
-                <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs shadow-2xs">
-                  <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                  <span className="font-bold text-slate-600 text-[11px] shrink-0">Subject:</span>
-                  <select
-                    value={selectedSubjectId}
-                    onChange={(e) => setSelectedSubjectId(e.target.value)}
-                    className="bg-transparent font-black text-slate-900 focus:outline-none cursor-pointer pr-1 text-xs"
-                    title="Select subject to enter assessment scores"
-                  >
-                    {availableSubjects.map((sub) => (
-                      <option key={sub.subjectId} value={sub.subjectId}>
-                        {sub.subjectName} ({sub.subjectAmharic})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddColumnModal}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  title="Add customizable assessment column with custom max score and bonus points"
+                >
+                  <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>{lang === 'am' ? 'የውጤት መስክ አክል (+)' : '+ Add Assessment Column'}</span>
+                </button>
 
                 <button
                   onClick={handleExportCSV}
@@ -1023,7 +1366,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <div className="flex items-center gap-2 text-emerald-950">
                 <BookOpen className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>
-                  Active Subject: <strong className="font-bold">{currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase()}</strong> ({currentSubjectObj?.subjectAmharic || ''})
+                  Active Subject: <strong className="font-bold">{currentSubjectObj?.subjectName || activeTeacherUser.subject}</strong> ({currentSubjectObj?.subjectAmharic || ''})
                 </span>
                 <span className="text-emerald-400">•</span>
                 <span className="text-emerald-800">
@@ -1034,8 +1377,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   Semester <strong className="font-bold">{selectedSemester}</strong>
                 </span>
               </div>
-              <div className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2 py-0.5 rounded border border-emerald-200">
-                Continuous: 30% | Midterm: 20% | Final: 50%
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2.5 py-0.5 rounded border border-emerald-200">
+                  Total Assessment Base:{' '}
+                  <strong>{assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)} pts</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleOpenAddColumnModal}
+                  className="text-[11px] text-emerald-700 hover:text-emerald-950 font-bold underline cursor-pointer"
+                >
+                  + Add Item
+                </button>
               </div>
             </div>
 
@@ -1043,11 +1396,43 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <thead>
                 <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                   <th className="py-3 px-3 text-center">#</th>
-                  <th className="py-3 px-4">Student Name & ID</th>
-                  <th className="py-3 px-3 text-center w-28">Continuous (30)</th>
-                  <th className="py-3 px-3 text-center w-28">Midterm (20)</th>
-                  <th className="py-3 px-3 text-center w-28">Final Exam (50)</th>
-                  <th className="py-3 px-3 text-center w-24">Total (100)</th>
+                  <th className="py-3 px-4 min-w-[170px]">Student Name & ID</th>
+                  {assessmentColumns.map((col) => (
+                    <th key={col.id} className="py-3 px-2 text-center min-w-[120px]">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="font-bold text-slate-900 truncate max-w-[90px]">{col.name}</span>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditColumnModal(col)}
+                            className="p-0.5 text-slate-400 hover:text-emerald-700 rounded transition-colors"
+                            title={`Edit ${col.name}`}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          {assessmentColumns.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteColumn(col.id)}
+                              className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                              title={`Delete ${col.name}`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`text-[10px] block font-mono ${col.isBonus ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
+                        ({col.maxScore} pts{col.isBonus ? ' • Bonus' : ''})
+                      </span>
+                    </th>
+                  ))}
+                  <th className="py-3 px-3 text-center w-24">
+                    <div>Total</div>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      ({assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)})
+                    </span>
+                  </th>
                   <th className="py-3 px-3 text-center w-20">Grade</th>
                   <th className="py-3 px-3 text-center w-24">Status</th>
                 </tr>
@@ -1055,25 +1440,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <tbody className="divide-y divide-slate-100 text-slate-900">
                 {filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-500">
+                    <td colSpan={5 + assessmentColumns.length} className="py-8 text-center text-slate-500">
                       No students found in Section {selectedSection}.
                     </td>
                   </tr>
                 ) : (
                   filteredStudents.map((student, idx) => {
-                    const semData =
-                      student.semesters.find((s) => s.semester === selectedSemester) || student.semesters[0];
-                    const subject = semData?.subjects.find(
-                      (s) =>
-                        s.subjectId === selectedSubjectId ||
-                        (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
-                        (selectedSubjectId === 'ict' && s.subjectId === 'it')
-                    );
-                    const continuous = subject?.continuousAssessment ?? 0;
-                    const mid = subject?.midExam ?? 0;
-                    const final = subject?.finalExam ?? 0;
-                    const total = continuous + mid + final;
-                    const letter = getEthiopianLetterGrade(total);
+                    const summary = calculateStudentCustomSummary(student);
 
                     return (
                       <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
@@ -1082,63 +1455,52 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           <div>{student.fullName}</div>
                           <div className="text-[11px] text-slate-500 font-mono">{student.studentId}</div>
                         </td>
-                        <td className="py-3 px-3 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            max="30"
-                            value={continuous}
-                            onChange={(e) =>
-                              handleScoreChange(student.id, 'continuousAssessment', Number(e.target.value))
-                            }
-                            className="w-16 text-center font-mono py-1 rounded border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            value={mid}
-                            onChange={(e) =>
-                              handleScoreChange(student.id, 'midExam', Number(e.target.value))
-                            }
-                            className="w-16 text-center font-mono py-1 rounded border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            max="50"
-                            value={final}
-                            onChange={(e) =>
-                              handleScoreChange(student.id, 'finalExam', Number(e.target.value))
-                            }
-                            className="w-16 text-center font-mono py-1 rounded border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500"
-                          />
-                        </td>
+
+                        {assessmentColumns.map((col) => {
+                          const val = getStudentColumnScore(student, col.id);
+                          return (
+                            <td key={col.id} className="py-3 px-2 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max={col.maxScore}
+                                value={val === 0 ? '' : val}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  handleCustomScoreChange(student.id, col.id, Number(e.target.value))
+                                }
+                                className={`w-16 text-center font-mono py-1 rounded border text-xs focus:ring-2 focus:ring-emerald-500 ${
+                                  col.isBonus
+                                    ? 'border-amber-300 bg-amber-50/50 text-amber-950 font-bold'
+                                    : 'border-slate-200 bg-white text-slate-900'
+                                }`}
+                                title={`Max: ${col.maxScore}${col.isBonus ? ' (Bonus)' : ''}`}
+                              />
+                            </td>
+                          );
+                        })}
+
                         <td className="py-3 px-3 text-center font-mono font-bold text-slate-900 tabular-nums">
-                          {total}
+                          {summary.totalEarned}
                         </td>
                         <td className="py-3 px-3 text-center font-mono font-bold">
                           <span
                             className={`px-2 py-0.5 rounded text-[11px] ${
-                              total >= 80
+                              summary.percentage >= 80
                                 ? 'bg-emerald-50 text-emerald-800'
-                                : total >= 50
+                                : summary.percentage >= 50
                                 ? 'bg-blue-50 text-blue-800'
                                 : 'bg-rose-50 text-rose-800'
                             }`}
                           >
-                            {letter.letter}
+                            {summary.letter.letter}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center font-medium">
-                          {total >= 50 ? (
-                            <span className="text-emerald-700">Pass</span>
+                          {summary.status === 'Pass' ? (
+                            <span className="text-emerald-700 font-semibold">Pass</span>
                           ) : (
-                            <span className="text-rose-600">Remedial</span>
+                            <span className="text-rose-600 font-semibold">Fail</span>
                           )}
                         </td>
                       </tr>
@@ -1337,6 +1699,99 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
         )}
       </div>
+
+      {/* ADD / EDIT ASSESSMENT COLUMN MODAL */}
+      {isColumnModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm">
+                  {editingColumnId
+                    ? lang === 'am' ? 'የውጤት መስክ አሻሽል' : 'Edit Assessment Column'
+                    : lang === 'am' ? 'አዲስ የውጤት መስክ አክል' : 'Add Assessment Column'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsColumnModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveColumnModal} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {lang === 'am' ? 'የውጤት አይነት ስም' : 'Assessment Item Name / Title:'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Quiz 2, Practical Lab, Group Assignment, Midterm"
+                  value={colNameInput}
+                  onChange={(e) => setColNameInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {lang === 'am' ? 'የሚሰላበት ሙሉ ነጥብ (ከስንት)' : 'Maximum Points ("From how much"): *'}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  required
+                  value={colMaxInput}
+                  onChange={(e) => setColMaxInput(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold"
+                />
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Common point benchmarks: 5, 10, 15, 20, 25, 30, 40, 50, 100
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 space-y-1.5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={colBonusInput}
+                    onChange={(e) => setColBonusInput(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-amber-300 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-amber-950">
+                    {lang === 'am' ? 'ተጨማሪ / ቦነስ ነጥብ አለው' : 'Has Bonus / Extra Credit Points'}
+                  </span>
+                </label>
+                <p className="text-[11px] text-amber-800 leading-relaxed pl-6">
+                  Bonus points are awarded on top of the student&apos;s earned marks without increasing the mandatory course total.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsColumnModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{editingColumnId ? 'Update Column' : 'Add Column to Gradebook'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

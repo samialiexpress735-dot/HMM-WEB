@@ -308,7 +308,7 @@ export const StudentGradePortal: React.FC<StudentGradePortalProps> = ({ students
                 {lang === 'am' ? semesterSummary.statusAmharic : semesterSummary.status}
               </div>
               <span className="text-[11px] text-slate-500">
-                {semesterSummary.passedCount} Passed, {semesterSummary.failedCount} Remedial
+                {semesterSummary.passedCount} Passed{semesterSummary.failedCount > 0 ? `, ${semesterSummary.failedCount} Failed` : ''}
               </span>
             </div>
             <div className="p-3 bg-emerald-50 text-emerald-700 rounded-xl">

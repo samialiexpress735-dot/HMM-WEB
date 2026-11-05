@@ -2052,7 +2052,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                           {tot >= 50 ? (
                                             <span className="text-emerald-700">Pass</span>
                                           ) : (
-                                            <span className="text-rose-600">Remedial</span>
+                                            <span className="text-rose-600">Fail</span>
                                           )}
                                         </td>
                                       </tr>
