@@ -11,12 +11,14 @@ import {
   KeyRound,
   CheckCircle2
 } from 'lucide-react';
-import { Teacher } from '../data/schoolData';
+import { Teacher, GradeSection } from '../data/schoolData';
+import { getSectionsAssignedToTeacher } from '../utils/sectionUtils';
 
 interface TeacherLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   teachers: Teacher[];
+  sections?: GradeSection[];
   onSelectTeacher: (teacher: Teacher) => void;
   lang: 'en' | 'am';
 }
@@ -25,6 +27,7 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
   isOpen,
   onClose,
   teachers,
+  sections = [],
   onSelectTeacher,
   lang
 }) => {
@@ -269,7 +272,7 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                            {teacher.department} • {teacher.sectionsTeaching?.join(', ') || 'Assigned Sections'}
+                            {teacher.department} • Assigned: {getSectionsAssignedToTeacher(teacher, sections).join(', ') || 'Faculty'}
                           </div>
                         </div>
                       </div>

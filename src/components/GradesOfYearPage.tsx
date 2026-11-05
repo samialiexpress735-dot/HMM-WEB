@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
+import { getStudentsForSection as getStudentsForSectionUtil } from '../utils/sectionUtils';
 
 interface GradesOfYearPageProps {
   sections: GradeSection[];
@@ -233,13 +234,9 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
     setTimeout(() => setSaveToast(''), 4000);
   };
 
-  // Get enrolled students for a specific section
+  // Get enrolled students for a specific section (handles all formats: 9A, 11-Nat-A, etc.)
   const getStudentsForSection = (section: GradeSection) => {
-    // For 9A we have rich seeded student profiles
-    const matched = students.filter(
-      (st) => st.grade === section.grade && st.section.toUpperCase() === section.sectionLetter.toUpperCase()
-    );
-    return matched;
+    return getStudentsForSectionUtil(section.section, sections, students);
   };
 
   // Handle mark change for a student in the modal

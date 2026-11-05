@@ -42,6 +42,7 @@ import {
   subscribeToAllSchoolDataRealtime,
   isSupabaseConfigured
 } from './lib/supabase';
+import { getSectionsAssignedToTeacher } from './utils/sectionUtils';
 
 export default function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
@@ -324,7 +325,29 @@ export default function App() {
   };
 
   const handleUpdateSection = (updated: GradeSection) => {
-    setSections((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    setSections((prev) => {
+      const nextSections = prev.map((s) => (s.id === updated.id ? updated : s));
+      // Keep teachers' sectionsTeaching in complete sync with section assignments
+      setTeachers((prevTeachers) =>
+        prevTeachers.map((t) => ({
+          ...t,
+          sectionsTeaching: getSectionsAssignedToTeacher(t, nextSections)
+        }))
+      );
+      // If the currently active teacher user is affected, refresh their session
+      setTeacherUser((prevTeacher) => {
+        if (!prevTeacher) return null;
+        const updatedAssigned = getSectionsAssignedToTeacher(prevTeacher, nextSections);
+        const refreshed = { ...prevTeacher, sectionsTeaching: updatedAssigned };
+        try {
+          localStorage.setItem('hmm_teacher_user', JSON.stringify(refreshed));
+        } catch {
+          // ignore
+        }
+        return refreshed;
+      });
+      return nextSections;
+    });
     syncSectionToCloud(updated).catch(() => {});
   };
 
@@ -332,7 +355,14 @@ export default function App() {
     setSections((prev) => {
       const incomingCodes = new Set(newSections.map((s) => s.section.toUpperCase().trim()));
       const remainingPrev = prev.filter((s) => !incomingCodes.has(s.section.toUpperCase().trim()));
-      return [...newSections, ...remainingPrev];
+      const nextSections = [...newSections, ...remainingPrev];
+      setTeachers((prevTeachers) =>
+        prevTeachers.map((t) => ({
+          ...t,
+          sectionsTeaching: getSectionsAssignedToTeacher(t, nextSections)
+        }))
+      );
+      return nextSections;
     });
     newSections.forEach((sec) => {
       syncSectionToCloud(sec).catch(() => {});
@@ -465,6 +495,7 @@ export default function App() {
             students={students}
             onUpdateStudents={handleUpdateStudents}
             teachers={teachers}
+            sections={sections}
             lang={lang}
             initialSection={activeTeacherSection}
             initialSubjectId={activeTeacherSubject}
@@ -518,6 +549,7 @@ export default function App() {
         isOpen={isTeacherModalOpen}
         onClose={() => setIsTeacherModalOpen(false)}
         teachers={teachers}
+        sections={sections}
         onSelectTeacher={handleSelectTeacher}
         lang={lang}
       />

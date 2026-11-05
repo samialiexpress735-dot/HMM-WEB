@@ -19,15 +19,32 @@ import {
   Phone,
   MessageSquare,
   PlusCircle,
-  GraduationCap
+  GraduationCap,
+  Sparkles,
+  Layers,
+  Star,
+  Filter
 } from 'lucide-react';
-import { Student, Teacher } from '../data/schoolData';
+import {
+  Student,
+  Teacher,
+  GradeSection,
+  STANDARD_GRADE_9_10_SUBJECTS,
+  STANDARD_GRADE_11_12_NATURAL_SUBJECTS,
+  STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
+} from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
+import {
+  getSectionsAssignedToTeacher,
+  getTeacherRolesForSection,
+  getStudentsForSection
+} from '../utils/sectionUtils';
 
 interface TeacherPortalProps {
   students: Student[];
   onUpdateStudents: (updated: Student[]) => void;
   teachers: Teacher[];
+  sections?: GradeSection[];
   lang: 'en' | 'am';
   initialSection?: string;
   initialSubjectId?: string;
@@ -49,6 +66,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   students,
   onUpdateStudents,
   teachers,
+  sections = [],
   lang,
   initialSection = '9A',
   initialSubjectId = 'math',
@@ -64,10 +82,23 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [selectedTeacherPrompt, setSelectedTeacherPrompt] = useState<Teacher | null>(null);
   const [promptPasscode, setPromptPasscode] = useState('');
 
+  // Dynamically derive assigned sections from sections array and teacher profile
+  const assignedSections = React.useMemo(() => {
+    if (!activeTeacherUser) return [];
+    return getSectionsAssignedToTeacher(activeTeacherUser, sections);
+  }, [activeTeacherUser, sections]);
+
+  const [sectionFilterMode, setSectionFilterMode] = useState<'assigned' | 'all'>('assigned');
+
   // Class Management States
-  const [selectedSection, setSelectedSection] = useState<string>(
-    activeTeacherUser?.sectionsTeaching?.[0] || initialSection
-  );
+  const [selectedSection, setSelectedSection] = useState<string>(() => {
+    if (activeTeacherUser) {
+      const assigned = getSectionsAssignedToTeacher(activeTeacherUser, sections);
+      if (assigned.length > 0) return assigned[0];
+    }
+    if (sections.length > 0) return sections[0].section;
+    return initialSection;
+  });
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(initialSubjectId);
   const [selectedSemester, setSelectedSemester] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<'marks' | 'attendance' | 'roster' | 'notices'>('marks');
@@ -98,13 +129,21 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [newNoticeDueDate, setNewNoticeDueDate] = useState('');
   const [showNewNoticeForm, setShowNewNoticeForm] = useState(false);
 
-  // Sync section if teacher changes
+  // Sync section and subject when teacher or sections change
   React.useEffect(() => {
     if (activeTeacherUser) {
-      if (activeTeacherUser.sectionsTeaching && activeTeacherUser.sectionsTeaching.length > 0) {
-        setSelectedSection(activeTeacherUser.sectionsTeaching[0]);
+      const assigned = getSectionsAssignedToTeacher(activeTeacherUser, sections);
+      if (assigned.length > 0) {
+        if (!selectedSection || !assigned.includes(selectedSection)) {
+          setSelectedSection(assigned[0]);
+        }
+      } else if (sections.length > 0) {
+        if (!selectedSection || !sections.some((s) => s.section === selectedSection)) {
+          setSelectedSection(sections[0].section);
+        }
       }
-      const subj = activeTeacherUser.subject.toLowerCase();
+
+      const subj = (activeTeacherUser.subject || '').toLowerCase();
       if (subj.includes('math')) setSelectedSubjectId('math');
       else if (subj.includes('phys')) setSelectedSubjectId('phys');
       else if (subj.includes('chem')) setSelectedSubjectId('chem');
@@ -115,8 +154,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       else if (subj.includes('hist')) setSelectedSubjectId('hist');
       else if (subj.includes('civ')) setSelectedSubjectId('civ');
       else if (subj.includes('it') || subj.includes('ict')) setSelectedSubjectId('it');
+      else if (subj.includes('econ')) setSelectedSubjectId('econ');
+      else if (subj.includes('pe') || subj.includes('sport')) setSelectedSubjectId('pe');
     }
-  }, [activeTeacherUser]);
+  }, [activeTeacherUser, sections]);
 
   const verifyTeacherCredentials = (teacher: Teacher, pass: string): boolean => {
     const cleanPass = pass.trim();
@@ -351,7 +392,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {teacher.department} • Assigned: {teacher.sectionsTeaching?.join(', ') || 'Grades 9 & 10'}
+                                  {teacher.department} • Assigned: {getSectionsAssignedToTeacher(teacher, sections).join(', ') || 'Faculty'}
                                 </div>
                               </div>
                             </div>
@@ -429,19 +470,54 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   // VIEW 2: LOGGED-IN TEACHER CLASS MANAGEMENT
   // ==========================================
 
-  // Filter students for the active class section
-  const currentGradeNum = parseInt(selectedSection.replace(/\D/g, ''), 10) || 9;
-  const currentSectionLetter = selectedSection.replace(/\d/g, '') || 'A';
+  // Filter students for the active class section accurately
+  const sectionStudents = React.useMemo(() => {
+    return getStudentsForSection(selectedSection, sections, students);
+  }, [selectedSection, sections, students]);
 
-  const sectionStudents = students.filter(
-    (s) => s.grade === currentGradeNum && s.section.toUpperCase() === currentSectionLetter.toUpperCase()
+  // Derived visible sections based on filter mode ('assigned' vs 'all')
+  const visibleSections = React.useMemo(() => {
+    if (sectionFilterMode === 'assigned' && assignedSections.length > 0) {
+      return assignedSections;
+    }
+    const allSecCodes = sections.map((s) => s.section);
+    return allSecCodes.length > 0
+      ? allSecCodes
+      : assignedSections.length > 0
+      ? assignedSections
+      : ['9A'];
+  }, [sectionFilterMode, assignedSections, sections]);
+
+  // Current active section object and subjects
+  const currentSectionObj = sections.find(
+    (s) => (s.section || '').toUpperCase() === selectedSection.toUpperCase()
   );
+
+  const availableSubjects = React.useMemo(() => {
+    if (currentSectionObj?.subjectAssignments && currentSectionObj.subjectAssignments.length > 0) {
+      return currentSectionObj.subjectAssignments;
+    }
+    const gr = currentSectionObj?.grade || parseInt(selectedSection.replace(/\D/g, ''), 10) || 9;
+    if (gr >= 11) {
+      return currentSectionObj?.stream === 'Social Science' || selectedSection.includes('-Soc')
+        ? STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
+        : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
+    }
+    return STANDARD_GRADE_9_10_SUBJECTS;
+  }, [currentSectionObj, selectedSection]);
+
+  const currentSubjectObj = availableSubjects.find(
+    (s) =>
+      s.subjectId === selectedSubjectId ||
+      (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
+      (selectedSubjectId === 'ict' && s.subjectId === 'it')
+  ) || availableSubjects[0];
 
   const filteredStudents = sectionStudents.filter(
     (s) =>
       s.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.studentId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.fullNameAmharic.includes(searchQuery)
+      (s.fullNameAmharic && s.fullNameAmharic.includes(searchQuery))
   );
 
   // Mark Score Handlers
@@ -453,20 +529,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     const updated = students.map((st) => {
       if (st.id === studentId) {
         const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
-        const existingSubject = semesterData?.subjects.find((s) => s.subjectId === selectedSubjectId);
+        const existingSubject = semesterData?.subjects.find(
+          (s) =>
+            s.subjectId === selectedSubjectId ||
+            (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
+            (selectedSubjectId === 'ict' && s.subjectId === 'it')
+        );
 
         let newSubjects;
         if (existingSubject) {
           newSubjects = semesterData.subjects.map((sub) =>
-            sub.subjectId === selectedSubjectId ? { ...sub, [field]: value } : sub
+            sub.subjectId === existingSubject.subjectId ? { ...sub, [field]: value } : sub
           );
         } else {
           newSubjects = [
             ...(semesterData?.subjects || []),
             {
               subjectId: selectedSubjectId,
-              subjectName: selectedSubjectId.toUpperCase(),
-              subjectAmharic: selectedSubjectId.toUpperCase(),
+              subjectName: currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase(),
+              subjectAmharic: currentSubjectObj?.subjectAmharic || selectedSubjectId.toUpperCase(),
               teacherName: activeTeacherUser?.name || 'Subject Teacher',
               continuousAssessment: field === 'continuousAssessment' ? value : 0,
               midExam: field === 'midExam' ? value : 0,
@@ -475,9 +556,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           ];
         }
 
-        const updatedSemesters = st.semesters.map((sem) =>
-          sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem
-        );
+        const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
+        let updatedSemesters;
+        if (hasSemester) {
+          updatedSemesters = st.semesters.map((sem) =>
+            sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem
+          );
+        } else {
+          updatedSemesters = [
+            ...st.semesters,
+            { semester: selectedSemester, subjects: newSubjects }
+          ];
+        }
 
         return { ...st, semesters: updatedSemesters };
       }
@@ -497,8 +587,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   };
 
   const handleMarkAllPresent = () => {
+    const studentIdsInSection = new Set(sectionStudents.map((s) => s.id));
     const updated = students.map((s) => {
-      if (s.grade === currentGradeNum && s.section.toUpperCase() === currentSectionLetter.toUpperCase()) {
+      if (studentIdsInSection.has(s.id)) {
         return { ...s, attendanceStatus: 'Present' as const };
       }
       return s;
@@ -654,41 +745,116 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         </div>
 
         {/* Section Switcher & Semester Toggle */}
-        <div className="pt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold text-slate-500">Your Assigned Classes:</span>
-            {(activeTeacherUser.sectionsTeaching || ['9A', '9B', '10A']).map((sec) => (
+        <div className="pt-5 space-y-3">
+          {assignedSections.length === 0 && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">Notice:</span>
+                <span>You have not yet been assigned to a specific section by Admin in Grades of This Year. You may view and record marks for any school section below:</span>
+              </div>
+              <span className="text-[11px] font-semibold text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 shrink-0">
+                School-Wide Access
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 mr-1">
+                <span className="text-xs font-bold text-slate-700">Class:</span>
+                {assignedSections.length > 0 && sections.length > assignedSections.length && (
+                  <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setSectionFilterMode('assigned')}
+                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                        sectionFilterMode === 'assigned'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      Assigned ({assignedSections.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSectionFilterMode('all')}
+                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                        sectionFilterMode === 'all'
+                          ? 'bg-white text-slate-900 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-900'
+                      }`}
+                    >
+                      All ({sections.length})
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {visibleSections.map((sec) => {
+                const targetSecObj = sections.find(
+                  (s) => (s.section || '').toUpperCase() === sec.toUpperCase()
+                );
+                const roles = targetSecObj
+                  ? getTeacherRolesForSection(activeTeacherUser, targetSecObj)
+                  : { isHomeroom: false, subjects: [] };
+
+                return (
+                  <button
+                    key={sec}
+                    onClick={() => setSelectedSection(sec)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      selectedSection === sec
+                        ? 'bg-slate-900 text-white shadow-sm ring-2 ring-emerald-500/40'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span>Section {sec}</span>
+                    {roles.isHomeroom && (
+                      <span
+                        className={`text-[9px] px-1 py-0.2 rounded font-bold ${
+                          selectedSection === sec
+                            ? 'bg-amber-400 text-amber-950'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                        title="You are the Homeroom Teacher for this section"
+                      >
+                        ★ Homeroom
+                      </span>
+                    )}
+                    {roles.subjects.length > 0 && !roles.isHomeroom && (
+                      <span
+                        className={`text-[9px] px-1 py-0.2 rounded font-medium ${
+                          selectedSection === sec
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}
+                      >
+                        {roles.subjects[0]}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
               <button
-                key={sec}
-                onClick={() => setSelectedSection(sec)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedSection === sec
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                onClick={() => setSelectedSemester(1)}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                  selectedSemester === 1 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Section {sec}
+                Semester 1
               </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
-            <button
-              onClick={() => setSelectedSemester(1)}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
-                selectedSemester === 1 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Semester 1
-            </button>
-            <button
-              onClick={() => setSelectedSemester(2)}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
-                selectedSemester === 2 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Semester 2
-            </button>
+              <button
+                onClick={() => setSelectedSemester(2)}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                  selectedSemester === 2 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Semester 2
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -769,9 +935,26 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
 
           {/* Action Tools */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {activeTab === 'marks' && (
               <>
+                <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs shadow-2xs">
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <span className="font-bold text-slate-600 text-[11px] shrink-0">Subject:</span>
+                  <select
+                    value={selectedSubjectId}
+                    onChange={(e) => setSelectedSubjectId(e.target.value)}
+                    className="bg-transparent font-black text-slate-900 focus:outline-none cursor-pointer pr-1 text-xs"
+                    title="Select subject to enter assessment scores"
+                  >
+                    {availableSubjects.map((sub) => (
+                      <option key={sub.subjectId} value={sub.subjectId}>
+                        {sub.subjectName} ({sub.subjectAmharic})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <button
                   onClick={handleExportCSV}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
@@ -836,6 +1019,26 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         {/* TAB 1: MARKS & CONTINUOUS ASSESSMENT */}
         {activeTab === 'marks' && (
           <div className="overflow-x-auto">
+            <div className="px-4 py-2.5 bg-emerald-50/70 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-emerald-950">
+                <BookOpen className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>
+                  Active Subject: <strong className="font-bold">{currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase()}</strong> ({currentSubjectObj?.subjectAmharic || ''})
+                </span>
+                <span className="text-emerald-400">•</span>
+                <span className="text-emerald-800">
+                  Section <strong className="font-bold">{selectedSection}</strong>
+                </span>
+                <span className="text-emerald-400">•</span>
+                <span className="text-emerald-800">
+                  Semester <strong className="font-bold">{selectedSemester}</strong>
+                </span>
+              </div>
+              <div className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2 py-0.5 rounded border border-emerald-200">
+                Continuous: 30% | Midterm: 20% | Final: 50%
+              </div>
+            </div>
+
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
@@ -860,7 +1063,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   filteredStudents.map((student, idx) => {
                     const semData =
                       student.semesters.find((s) => s.semester === selectedSemester) || student.semesters[0];
-                    const subject = semData?.subjects.find((s) => s.subjectId === selectedSubjectId);
+                    const subject = semData?.subjects.find(
+                      (s) =>
+                        s.subjectId === selectedSubjectId ||
+                        (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
+                        (selectedSubjectId === 'ict' && s.subjectId === 'it')
+                    );
                     const continuous = subject?.continuousAssessment ?? 0;
                     const mid = subject?.midExam ?? 0;
                     const final = subject?.finalExam ?? 0;

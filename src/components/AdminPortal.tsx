@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { Teacher, Student, GradeSection, SchoolEvent, SchoolAnnouncement } from '../data/schoolData';
 import { UserAccount, generateStaffPassword, generateStudentPasscode } from '../utils/authUtils';
+import { getSectionsAssignedToTeacher, getStudentsForSection } from '../utils/sectionUtils';
 import {
   syncTeacherToCloud,
   updateAdminProfileInCloud,
@@ -424,13 +425,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setTimeout(() => setSuccessBanner(''), 6000);
   };
 
-  // Filter students for the credential distribution desk
-  const currentGradeNum = parseInt(selectedSection.replace(/\D/g, ''), 10) || 9;
-  const currentSectionLetter = selectedSection.replace(/\d/g, '') || 'A';
-
-  const sectionStudents = students.filter(
-    (s) => s.grade === currentGradeNum && s.section.toUpperCase() === currentSectionLetter.toUpperCase()
-  );
+  // Filter students for the credential distribution desk (handles 9A, 11-Nat-A, etc.)
+  const sectionStudents = React.useMemo(() => {
+    return getStudentsForSection(selectedSection, sections, students);
+  }, [selectedSection, sections, students]);
 
   const filteredStudents = sectionStudents.filter(
     (s) =>
@@ -1443,7 +1441,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 <div className="text-[11px] text-slate-500 mt-1">
                                   Classes:{' '}
                                   <strong className="text-slate-800">
-                                    {t.sectionsTeaching?.join(', ') || 'Unassigned'}
+                                    {getSectionsAssignedToTeacher(t, sections).join(', ') || 'Unassigned'}
                                   </strong>
                                 </div>
                               </div>
