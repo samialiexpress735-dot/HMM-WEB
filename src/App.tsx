@@ -387,28 +387,34 @@ export default function App() {
     setCurrentTab('teacher');
   };
 
+  const isDedicatedWorkspace =
+    (Boolean(teacherUser) && currentTab === 'teacher') ||
+    (Boolean(adminUser) && ['admin', 'registrar', 'grades'].includes(currentTab));
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-emerald-600 selection:text-white w-full max-w-full overflow-x-hidden">
-      {/* Navigation Bar with Ethiopian MoE Brand, Language Switcher, Admin & Teacher Status */}
-      <Navbar
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        lang={lang}
-        setLang={setLang}
-        adminUser={adminUser}
-        onSignOut={handleSignOutAdmin}
-        onOpenAdminSignup={() => {
-          setCurrentTab('admin');
-        }}
-        teacherUser={teacherUser}
-        onSignOutTeacher={handleSignOutTeacher}
-        onOpenTeacherLogin={() => setIsTeacherModalOpen(true)}
-        portalMode={portalMode}
-        onTogglePortalMode={handleTogglePortalMode}
-      />
+      {/* Navigation Bar with Ethiopian MoE Brand, Language Switcher, Admin & Teacher Status (hidden inside dedicated authenticated workspaces) */}
+      {!isDedicatedWorkspace && (
+        <Navbar
+          currentTab={currentTab}
+          setCurrentTab={setCurrentTab}
+          lang={lang}
+          setLang={setLang}
+          adminUser={adminUser}
+          onSignOut={handleSignOutAdmin}
+          onOpenAdminSignup={() => {
+            setCurrentTab('admin');
+          }}
+          teacherUser={teacherUser}
+          onSignOutTeacher={handleSignOutTeacher}
+          onOpenTeacherLogin={() => setIsTeacherModalOpen(true)}
+          portalMode={portalMode}
+          onTogglePortalMode={handleTogglePortalMode}
+        />
+      )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-8 min-w-0">
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 ${isDedicatedWorkspace ? 'py-3 sm:py-4' : 'py-6 sm:py-8'} min-w-0`}>
         {currentTab === 'admin' && (
           adminUser ? (
             <AdminPortal
@@ -426,6 +432,10 @@ export default function App() {
               adminUser={adminUser}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToRegistrar={() => setCurrentTab('registrar')}
+              onNavigateHome={() => {
+                setPortalMode('public');
+                setCurrentTab('home');
+              }}
               onSignOut={handleSignOutAdmin}
             />
           ) : (
@@ -451,6 +461,12 @@ export default function App() {
               lang={lang}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToTeacher={handleNavigateToTeacherPortal}
+              onNavigateToAdmin={() => setCurrentTab('admin')}
+              onNavigateHome={() => {
+                setPortalMode('public');
+                setCurrentTab('home');
+              }}
+              onSignOutAdmin={handleSignOutAdmin}
             />
           ) : (
             <div className="space-y-6">
@@ -487,6 +503,13 @@ export default function App() {
             lang={lang}
             onNavigateToTeacherPortal={handleNavigateToTeacherPortal}
             onNavigateToGradePortal={() => setCurrentTab('portal')}
+            onNavigateToAdmin={() => setCurrentTab('admin')}
+            onNavigateToRegistrar={() => setCurrentTab('registrar')}
+            onNavigateHome={() => {
+              setPortalMode('public');
+              setCurrentTab('home');
+            }}
+            onSignOutAdmin={handleSignOutAdmin}
           />
         )}
 
@@ -502,6 +525,10 @@ export default function App() {
             activeTeacherUser={teacherUser}
             onSignOutTeacher={handleSignOutTeacher}
             onSignInTeacher={handleSelectTeacher}
+            onNavigateHome={() => {
+              setPortalMode('public');
+              setCurrentTab('home');
+            }}
           />
         )}
 
@@ -554,8 +581,8 @@ export default function App() {
         lang={lang}
       />
 
-      {/* Footer */}
-      <Footer onNavigate={setCurrentTab} lang={lang} />
+      {/* Footer (hidden inside dedicated workspaces for full focused screen space) */}
+      {!isDedicatedWorkspace && <Footer onNavigate={setCurrentTab} lang={lang} />}
     </div>
   );
 }

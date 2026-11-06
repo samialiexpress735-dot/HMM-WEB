@@ -25,7 +25,11 @@ import {
   ChevronDown,
   Save,
   Printer,
-  AlertTriangle
+  AlertTriangle,
+  ArrowLeft,
+  Globe,
+  LogOut,
+  UserPlus
 } from 'lucide-react';
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
@@ -40,6 +44,10 @@ interface GradesOfYearPageProps {
   lang: 'en' | 'am';
   onNavigateToTeacherPortal?: (sectionCode?: string, subjectId?: string) => void;
   onNavigateToGradePortal?: () => void;
+  onNavigateToAdmin?: () => void;
+  onNavigateToRegistrar?: () => void;
+  onNavigateHome?: () => void;
+  onSignOutAdmin?: () => void;
 }
 
 export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string): boolean {
@@ -88,7 +96,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   onUpdateStudents,
   lang,
   onNavigateToTeacherPortal,
-  onNavigateToGradePortal
+  onNavigateToGradePortal,
+  onNavigateToAdmin,
+  onNavigateToRegistrar,
+  onNavigateHome,
+  onSignOutAdmin
 }) => {
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<number | 'all'>('all');
   const [selectedStreamFilter, setSelectedStreamFilter] = useState<string>('all');
@@ -282,6 +294,53 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
           <span className="font-semibold text-sm">{saveToast}</span>
         </div>
       )}
+
+      {/* Top Navigation Bar for Admin Suite */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+        <div className="flex items-center gap-2">
+          {onNavigateToAdmin && (
+            <button
+              onClick={onNavigateToAdmin}
+              className="btn-animated px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-amber-400" />
+              <span>{lang === 'am' ? '← ወደ አድሚን ዴስክ' : '← Back to Admin Desk'}</span>
+            </button>
+          )}
+          {onNavigateToRegistrar && (
+            <button
+              onClick={onNavigateToRegistrar}
+              className="btn-animated px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-950" />
+              <span>{lang === 'am' ? 'ምዝገባ (2019 ዓ.ም.) →' : '2019 Registrar Desk →'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {onNavigateHome && (
+            <button
+              onClick={onNavigateHome}
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="View Public School Website"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{lang === 'am' ? 'ድረ-ገጽ' : 'Public Site'}</span>
+            </button>
+          )}
+          {onSignOutAdmin && (
+            <button
+              onClick={onSignOutAdmin}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="Sign out of Administrator Suite"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{lang === 'am' ? 'ውጣ' : 'Sign Out'}</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* MoE Official Header & Academic Year Banner */}
       <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-sm relative overflow-hidden">

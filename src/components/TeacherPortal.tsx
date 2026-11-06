@@ -32,7 +32,8 @@ import {
   SlidersHorizontal,
   Check,
   X,
-  ChevronRight
+  ChevronRight,
+  Globe
 } from 'lucide-react';
 import {
   Student,
@@ -74,6 +75,7 @@ interface TeacherPortalProps {
   activeTeacherUser?: Teacher | null;
   onSignOutTeacher?: () => void;
   onSignInTeacher?: (teacher: Teacher) => void;
+  onNavigateHome?: () => void;
 }
 
 interface ClassAnnouncement {
@@ -95,7 +97,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   initialSubjectId = 'math',
   activeTeacherUser,
   onSignOutTeacher,
-  onSignInTeacher
+  onSignInTeacher,
+  onNavigateHome
 }) => {
   // Login Form States (used when activeTeacherUser is null)
   const [loginEmail, setLoginEmail] = useState('');
@@ -938,17 +941,28 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </div>
 
             {/* Action buttons & Sign Out */}
-            <div className="flex items-center gap-3">
-              <div className="text-xs text-slate-500 hidden sm:block">
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-slate-500 hidden sm:block mr-1">
                 Role: <strong className="text-slate-800">Faculty Instructor</strong>
               </div>
+              {onNavigateHome && (
+                <button
+                  type="button"
+                  onClick={onNavigateHome}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  title="View Public School Website"
+                >
+                  <Globe className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Public Site</span>
+                </button>
+              )}
               {onSignOutTeacher && (
                 <button
                   onClick={onSignOutTeacher}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                   title="Sign out of Teacher Desk"
                 >
-                  <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                  <LogOut className="w-3.5 h-3.5 text-rose-600" />
                   <span>Sign Out</span>
                 </button>
               )}
@@ -1188,13 +1202,25 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </button>
             </div>
 
+            {onNavigateHome && (
+              <button
+                type="button"
+                onClick={onNavigateHome}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer ml-1"
+                title="View Public School Website"
+              >
+                <Globe className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="hidden sm:inline">Public Site</span>
+              </button>
+            )}
+
             {onSignOutTeacher && (
               <button
                 onClick={onSignOutTeacher}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer ml-1"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                 title="Sign out"
               >
-                <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                <LogOut className="w-3.5 h-3.5 text-rose-600" />
                 <span className="hidden sm:inline">Sign Out</span>
               </button>
             )}

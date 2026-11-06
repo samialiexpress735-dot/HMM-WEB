@@ -32,7 +32,8 @@ import {
   X,
   Shuffle,
   GraduationCap,
-  FileText
+  FileText,
+  Globe
 } from 'lucide-react';
 import { Teacher, Student, GradeSection, SchoolEvent, SchoolAnnouncement } from '../data/schoolData';
 import { UserAccount, generateStaffPassword, generateStudentPasscode } from '../utils/authUtils';
@@ -61,6 +62,7 @@ interface AdminPortalProps {
   adminUser?: AdminUser | null;
   onNavigateToGrades?: () => void;
   onNavigateToRegistrar?: () => void;
+  onNavigateHome?: () => void;
   onSignOut?: () => void;
 }
 
@@ -79,6 +81,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   adminUser,
   onNavigateToGrades,
   onNavigateToRegistrar,
+  onNavigateHome,
   onSignOut
 }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'overview' | 'staff' | 'students' | 'credentials' | 'notices' | 'school'>('overview');
@@ -504,6 +507,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <span>Edit Profile</span>
                 </button>
 
+                {onNavigateHome && (
+                  <button
+                    type="button"
+                    onClick={onNavigateHome}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white text-slate-700 hover:bg-slate-100 border border-[#ebd3c4] shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                    title="View Public School Website"
+                  >
+                    <Globe className="w-3 h-3 text-emerald-700" />
+                    <span>Public Site</span>
+                  </button>
+                )}
+
                 {onSignOut && (
                   <button
                     onClick={onSignOut}
@@ -520,7 +535,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       </div>
 
       {/* DEDICATED ADMIN SUB-NAVBAR (Clean, elevated, easy to manage) */}
-      <nav className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-2 sm:p-2.5 sticky top-16 z-30 flex flex-wrap items-center justify-between gap-3">
+      <nav className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-2 sm:p-2.5 sticky top-2 z-30 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <button
             onClick={() => setActiveAdminTab('overview')}
