@@ -209,6 +209,8 @@ export interface GradeSection {
   shift: 'Morning Shift (ጧት)' | 'Afternoon Shift (ከሰዓት)';
   attendanceToday: number;
   isDemoAvailable?: boolean;
+  isCteSection?: boolean;
+  cteSpecialization?: CTESpecialization | string;
 }
 
 export const CTE_SPECIALIZATION_OPTIONS = [

@@ -221,12 +221,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 group-hover:text-amber-700 transition-colors">
-                  {lang === 'am' ? 'ሬጅስትራር እና አስተዳደር (2019 ዓ.ም.)' : 'Registrar & Intake Office'}
+                  {lang === 'am' ? 'ሬጅስትራር እና አስተዳደር (2017 ዓ.ም.)' : 'Registrar & Intake Office (2017 E.C.)'}
                 </h3>
                 <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
                   {lang === 'am'
-                    ? 'የ2019 ዓ.ም. አዲስ ምዝገባ አውቶኮምፕሊት፣ የተመጣጠነ የክፍል ድልድል እና የክፍለ-ጊዜ መደራረብ መከላከያ'
-                    : '2019 E.C. admission autocompletion, automated gender/merit-balanced section allocation, and timetable clash detection.'}
+                    ? 'የ2017 ዓ.ም. የተማሪዎች ምዝገባ፣ የተመጣጠነ የክፍል ድልድል እና የክፍለ-ጊዜ መደራረብ መከላከያ'
+                    : '2017 E.C. admission autocompletion, automated gender/merit-balanced section allocation, and timetable clash detection.'}
                 </p>
               </div>
             </div>

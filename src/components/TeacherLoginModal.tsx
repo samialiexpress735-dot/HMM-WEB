@@ -179,15 +179,11 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                     type="password"
                     autoFocus
                     required
-                    placeholder="Enter staff security key..."
+                    placeholder="Enter teacher passcode..."
                     value={promptPassword}
                     onChange={(e) => setPromptPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
                   />
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                  <span>Demo Faculty Key:</span>
-                  <code className="text-emerald-700 font-mono font-bold bg-emerald-50 px-1 py-0.5 rounded">debberhan2017</code>
                 </div>
               </div>
 
@@ -317,15 +313,11 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                     <input
                       type="password"
                       required
-                      placeholder="Enter staff security key (e.g. debberhan2017)"
+                      placeholder="Enter teacher password"
                       value={manualPassword}
                       onChange={(e) => setManualPassword(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     />
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                    <span>Default Key:</span>
-                    <code className="text-emerald-700 font-mono font-bold bg-emerald-50 px-1 py-0.5 rounded">debberhan2017</code>
                   </div>
                 </div>
 

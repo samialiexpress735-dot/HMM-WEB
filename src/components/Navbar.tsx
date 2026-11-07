@@ -59,7 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const adminNavItems = [
     { id: 'admin', labelEn: adminUser ? 'Admin Desk' : 'Admin Login', labelAm: adminUser ? 'አድሚን ዴስክ' : 'አድሚን መግቢያ', icon: adminUser ? ShieldCheck : Lock },
-    { id: 'registrar', labelEn: 'Registrar (2019 E.C.)', labelAm: 'ምዝገባ (2019 ዓ.ም.)', icon: UserPlus },
+    { id: 'registrar', labelEn: 'Registrar (2017 E.C.)', labelAm: 'ምዝገባ (2017 ዓ.ም.)', icon: UserPlus },
     { id: 'grades', labelEn: 'Sections & Curriculum', labelAm: 'ክፍሎችና ሥርዓተ-ትምህርት', icon: Layers },
     { id: 'teacher', labelEn: 'Teacher Suite', labelAm: 'የመምህራን ዴስክ', icon: FileSpreadsheet }
   ];

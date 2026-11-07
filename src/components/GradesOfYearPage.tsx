@@ -102,7 +102,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   onNavigateHome,
   onSignOutAdmin
 }) => {
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState<number | 'all'>('all');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<number | 'all' | 'cte'>('all');
   const [selectedStreamFilter, setSelectedStreamFilter] = useState<string>('all');
   const [selectedShiftFilter, setSelectedShiftFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -132,7 +132,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
 
   // Filtered sections
   const filteredSections = sections.filter((s) => {
-    if (selectedGradeFilter !== 'all' && s.grade !== selectedGradeFilter) return false;
+    if (selectedGradeFilter === 'cte') {
+      if (!s.isCteSection && !s.section.includes('CTE')) return false;
+    } else if (selectedGradeFilter !== 'all' && s.grade !== selectedGradeFilter) {
+      return false;
+    }
     if (selectedStreamFilter !== 'all' && s.stream !== selectedStreamFilter) return false;
     if (selectedShiftFilter !== 'all' && !s.shift.includes(selectedShiftFilter)) return false;
 
@@ -313,7 +317,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               className="btn-animated px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-950" />
-              <span>{lang === 'am' ? 'ምዝገባ (2019 ዓ.ም.) →' : '2019 Registrar Desk →'}</span>
+              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : '2017 Registrar Desk →'}</span>
             </button>
           )}
         </div>
@@ -424,11 +428,12 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               { id: 9, label: 'Grade 9 (4 Sections)' },
               { id: 10, label: 'Grade 10 (4 Sections)' },
               { id: 11, label: 'Grade 11 (4 Sections)' },
-              { id: 12, label: 'Grade 12 (4 Sections)' }
+              { id: 12, label: 'Grade 12 (4 Sections)' },
+              { id: 'cte', label: lang === 'am' ? '🛠️ CTE ሙያ ክፍሎች' : '🛠️ CTE Vocational Sections' }
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setSelectedGradeFilter(tab.id as number | 'all')}
+                onClick={() => setSelectedGradeFilter(tab.id as any)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   selectedGradeFilter === tab.id
                     ? 'bg-emerald-800 text-white shadow-sm'
@@ -545,6 +550,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                         <h3 className="text-base sm:text-lg font-black text-slate-900">
                           {lang === 'am' ? `${sec.grade}ኛ ክፍል • ሴክሽን "${sec.sectionLetter}"` : `Grade ${sec.grade} — Section "${sec.sectionLetter}"`}
                         </h3>
+                        {sec.isCteSection && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-900 border border-purple-300">
+                            🛠️ CTE: {sec.cteSpecialization}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold mt-0.5">
                         <span className="text-emerald-800 font-bold">
@@ -1046,6 +1056,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                               <span className="text-[11px] text-slate-400 block truncate">
                                 ID: {st.studentId} • Conduct: <strong>{st.conduct}</strong>
                               </span>
+                              {st.cteSpecialization && (
+                                <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
+                                  🛠️ CTE: {st.cteSpecialization}
+                                </span>
+                              )}
                             </div>
                           </div>
 

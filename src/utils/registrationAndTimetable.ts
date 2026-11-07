@@ -29,7 +29,7 @@ export interface RegisteredStudent2019 {
   targetGrade: number; // 9, 10, 11, 12
   stream?: 'Natural Science' | 'Social Science';
   cteSpecialization?: 'Web Design and Development' | 'Marketing' | 'Accounting' | 'Construction' | string;
-  academicYear: string; // '2019 E.C.'
+  academicYear: string; // '2017 E.C.'
   previousSchool: string;
   previousGrade: number;
   previousSection?: string;
@@ -122,6 +122,8 @@ export interface SectionAllocationBucket {
   highScorersCount?: number;
   mediumScorersCount?: number;
   supportScorersCount?: number;
+  isCteSection?: boolean;
+  cteSpecialization?: string;
 }
 
 /**
@@ -339,7 +341,7 @@ export function reassignStudentToSection(
  */
 export function generateSectionRosterCsv(
   buckets: SectionAllocationBucket[],
-  academicYear: string = '2019 E.C.'
+  academicYear: string = '2017 E.C.'
 ): string {
   const headers = [
     'Academic Year',

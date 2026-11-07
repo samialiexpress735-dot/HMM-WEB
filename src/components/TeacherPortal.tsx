@@ -33,7 +33,8 @@ import {
   Check,
   X,
   ChevronRight,
-  Globe
+  Globe,
+  Calendar
 } from 'lucide-react';
 import {
   Student,
@@ -56,6 +57,32 @@ export interface AssessmentColumn {
   maxScore: number;
   isBonus?: boolean;
 }
+
+export function getRecentSchoolDays(count: number = 12): string[] {
+  const days: string[] = [];
+  const current = new Date();
+  let checked = 0;
+  while (days.length < count && checked < 30) {
+    const d = new Date(current);
+    d.setDate(current.getDate() - checked);
+    const dayOfWeek = d.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      days.unshift(d.toISOString().split('T')[0]);
+    }
+    checked++;
+  }
+  return days;
+}
+
+export const formatMatrixDate = (dateStr: string) => {
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return { month: '', day: '', weekday: '', full: dateStr };
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  const month = d.toLocaleDateString('en-US', { month: 'short' });
+  const day = d.getDate();
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'narrow' });
+  return { month, day: String(day), weekday, full: `${month} ${day}` };
+};
 
 export const DEFAULT_ASSESSMENT_COLUMNS: AssessmentColumn[] = [
   { id: 'quiz1', name: 'Quiz / Test', maxScore: 10, isBonus: false },
@@ -121,6 +148,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(initialSubjectId);
   const [selectedSemester, setSelectedSemester] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<'marks' | 'attendance' | 'roster' | 'notices'>('marks');
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'spreadsheet' | 'daily'>('spreadsheet');
+  const [attendanceDates] = useState<string[]>(() => getRecentSchoolDays(12));
+  const [attendanceMatrix, setAttendanceMatrix] = useState<Record<string, Record<string, 'Present' | 'Absent' | 'Late' | 'Permission'>>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
@@ -228,16 +258,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
   const handleDeleteColumn = (colId: string) => {
     if (assessmentColumns.length <= 1) {
-      alert('You must keep at least one assessment column.');
+      setSaveSuccessMsg('At least one assessment column must be maintained.');
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
       return;
     }
     const target = assessmentColumns.find((c) => c.id === colId);
-    if (window.confirm(`Are you sure you want to remove column "${target?.name || ''}"?`)) {
-      const updated = assessmentColumns.filter((c) => c.id !== colId);
-      saveAssessmentColumns(updated);
-      setSaveSuccessMsg(`Column removed.`);
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
-    }
+    const updated = assessmentColumns.filter((c) => c.id !== colId);
+    saveAssessmentColumns(updated);
+    setSaveSuccessMsg(`Column "${target?.name || ''}" removed successfully.`);
+    setTimeout(() => setSaveSuccessMsg(''), 3000);
   };
 
   const handleEnterSection = (
@@ -797,13 +826,164 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onUpdateStudents(updated);
   };
 
-  // Attendance Handlers
+  // Attendance Handlers & Historical Matrix Synchronization
+  React.useEffect(() => {
+    if (!selectedSection) return;
+    const storageKey = `hmm_attendance_matrix_${selectedSection}`;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        setAttendanceMatrix(JSON.parse(saved));
+        return;
+      }
+    } catch {}
+
+    // Generate clean, realistic historical attendance matrix across past school days
+    const initial: Record<string, Record<string, 'Present' | 'Absent' | 'Late' | 'Permission'>> = {};
+    sectionStudents.forEach((student, sIdx) => {
+      initial[student.id] = {};
+      attendanceDates.forEach((dateStr, dIdx) => {
+        const seed = (sIdx * 17 + dIdx * 31) % 100;
+        let st: 'Present' | 'Absent' | 'Late' | 'Permission' = 'Present';
+        if (seed > 92) st = 'Absent';
+        else if (seed > 85) st = 'Late';
+        else if (seed > 80) st = 'Permission';
+        initial[student.id][dateStr] = st;
+      });
+    });
+    setAttendanceMatrix(initial);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(initial));
+    } catch {}
+  }, [selectedSection, sectionStudents.length, attendanceDates]);
+
   const handleAttendanceChange = (
     studentId: string,
     status: 'Present' | 'Absent' | 'Late' | 'Permission'
   ) => {
     const updated = students.map((s) => (s.id === studentId ? { ...s, attendanceStatus: status } : s));
     onUpdateStudents(updated);
+
+    // Sync to today's date in matrix
+    const todayStr = attendanceDates[attendanceDates.length - 1];
+    if (todayStr) {
+      setAttendanceMatrix((prev) => {
+        const next = {
+          ...prev,
+          [studentId]: {
+            ...(prev[studentId] || {}),
+            [todayStr]: status
+          }
+        };
+        if (selectedSection) {
+          try {
+            localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(next));
+          } catch {}
+        }
+        return next;
+      });
+    }
+  };
+
+  const handleMatrixCellClick = (studentId: string, dateStr: string) => {
+    const current = attendanceMatrix[studentId]?.[dateStr] || 'Present';
+    const cycle: Record<'Present' | 'Absent' | 'Late' | 'Permission', 'Present' | 'Absent' | 'Late' | 'Permission'> = {
+      Present: 'Absent',
+      Absent: 'Late',
+      Late: 'Permission',
+      Permission: 'Present'
+    };
+    const nextStatus = cycle[current] || 'Present';
+
+    const updated = {
+      ...attendanceMatrix,
+      [studentId]: {
+        ...(attendanceMatrix[studentId] || {}),
+        [dateStr]: nextStatus
+      }
+    };
+    setAttendanceMatrix(updated);
+    if (selectedSection) {
+      try {
+        localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(updated));
+      } catch {}
+    }
+
+    // If modifying today's date (the last date), also sync student.attendanceStatus
+    if (dateStr === attendanceDates[attendanceDates.length - 1]) {
+      const updatedStudents = students.map((s) => (s.id === studentId ? { ...s, attendanceStatus: nextStatus } : s));
+      onUpdateStudents(updatedStudents);
+    }
+  };
+
+  const handleMatrixMarkAllTodayPresent = () => {
+    const todayStr = attendanceDates[attendanceDates.length - 1];
+    const updated = { ...attendanceMatrix };
+    sectionStudents.forEach((s) => {
+      if (!updated[s.id]) updated[s.id] = {};
+      updated[s.id][todayStr] = 'Present';
+    });
+    setAttendanceMatrix(updated);
+    if (selectedSection) {
+      try {
+        localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(updated));
+      } catch {}
+    }
+    handleMarkAllPresent();
+  };
+
+  const handleExportAttendanceMatrixCSV = () => {
+    const headers = [
+      '#',
+      'Student ID',
+      'Full Name',
+      'Amharic Name',
+      'CTE Elective',
+      ...attendanceDates.map((d) => `"${formatMatrixDate(d).full}"`),
+      'Present Days',
+      'Absent Days',
+      'Late Days',
+      'Attendance Rate (%)'
+    ];
+
+    const rows = filteredStudents.map((s, idx) => {
+      const studentRecords = attendanceMatrix[s.id] || {};
+      let present = 0;
+      let absent = 0;
+      let late = 0;
+      const dateValues = attendanceDates.map((d) => {
+        const st = studentRecords[d] || 'Present';
+        if (st === 'Present') present++;
+        else if (st === 'Absent') absent++;
+        else if (st === 'Late') late++;
+        return st;
+      });
+      const totalDays = attendanceDates.length || 1;
+      const rate = Math.round(((present + late * 0.5) / totalDays) * 100);
+
+      return [
+        idx + 1,
+        `"${s.studentId}"`,
+        `"${s.fullName}"`,
+        `"${s.fullNameAmharic || ''}"`,
+        `"${s.cteSpecialization || 'None'}"`,
+        ...dateValues.map((v) => `"${v}"`),
+        present,
+        absent,
+        late,
+        `"${rate}%"`
+      ].join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Attendance_Matrix_Section_${selectedSection || 'Class'}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleMarkAllPresent = () => {
@@ -837,11 +1017,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       'Gender',
       'Grade',
       'Section',
+      'CTE Elective',
       ...assessmentColumns.map((c) => `"${c.name} (${c.maxScore}${c.isBonus ? ' Bonus' : ''})"`),
       `"Total (${maxPossible})"`,
       'Percentage (%)',
-      'Letter Grade',
-      'Status'
+      'Letter Grade'
     ];
 
     const rows = filteredStudents.map((s, idx) => {
@@ -856,11 +1036,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         `"${s.gender || 'M'}"`,
         s.grade,
         `"${s.section}"`,
+        `"${s.cteSpecialization || 'None'}"`,
         ...colScores,
         summary.totalEarned,
         summary.percentage,
-        `"${summary.letter.letter}"`,
-        `"${summary.status}"`
+        `"${summary.letter.letter}"`
       ].join(',');
     });
 
@@ -1134,13 +1314,14 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   // RENDER 2: SECTION WORKSPACE (Shown when teacher enters into a specific section)
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* 1. SECTION WORKSPACE HEADER WITH BACK TO SECTIONS */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
+      {/* 1. SECTION WORKSPACE HEADER WITH TOP ACTION BAR (The Common Place for Action Buttons) */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+        {/* Top Context & Navigation Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={() => setSelectedSection(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
               title="Return to sections list"
             >
               <ArrowLeft className="w-3.5 h-3.5 text-slate-600" />
@@ -1148,31 +1329,36 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </button>
 
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl font-black text-slate-900">Section {selectedSection}</h2>
-                <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                   {currentSubjectObj?.subjectName || activeTeacherUser.subject}
                 </span>
+                {currentSectionObj?.isCteSection && (
+                  <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-violet-100 text-violet-900 border border-violet-200">
+                    🛠️ CTE: {currentSectionObj.cteSpecialization}
+                  </span>
+                )}
                 {currentSectionObj && getTeacherRolesForSection(activeTeacherUser, currentSectionObj).isHomeroom && (
-                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                  <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                     ★ Homeroom Teacher
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Instructor: {activeTeacherUser.name} • {sectionStudents.length} Students Enrolled
+                Instructor: <strong>{activeTeacherUser.name}</strong> • Academic Year: <strong>2017 E.C. (2017 ዓ.ም.)</strong> • {sectionStudents.length} Students Enrolled
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Quick Switcher */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-600">
-              <span className="font-semibold hidden sm:inline">Switch Class:</span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Quick Section Switcher */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+              <span className="font-semibold hidden sm:inline">Section:</span>
               <select
                 value={selectedSection}
                 onChange={(e) => setSelectedSection(e.target.value)}
-                className="bg-slate-50 border border-slate-200 text-slate-800 font-bold text-xs rounded-lg px-2.5 py-1.5 cursor-pointer"
+                className="bg-transparent font-bold text-slate-900 text-xs outline-none cursor-pointer"
               >
                 {visibleSections.map((s) => (
                   <option key={s} value={s}>
@@ -1183,10 +1369,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </div>
 
             {/* Semester Switcher */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl shrink-0">
               <button
                 onClick={() => setSelectedSemester(1)}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                   selectedSemester === 1 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -1194,7 +1380,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </button>
               <button
                 onClick={() => setSelectedSemester(2)}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                   selectedSemester === 2 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -1206,7 +1392,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <button
                 type="button"
                 onClick={onNavigateHome}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer ml-1"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer ml-1"
                 title="View Public School Website"
               >
                 <Globe className="w-3.5 h-3.5 text-emerald-700" />
@@ -1217,7 +1403,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             {onSignOutTeacher && (
               <button
                 onClick={onSignOutTeacher}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
                 title="Sign out"
               >
                 <LogOut className="w-3.5 h-3.5 text-rose-600" />
@@ -1226,98 +1412,50 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             )}
           </div>
         </div>
-      </div>
 
-      {/* 2. STATS OVERVIEW FOR ACTIVE CLASS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-xs font-medium text-slate-500">Class Enrolled</div>
-          <div className="text-2xl font-bold text-slate-900 font-mono mt-1 tabular-nums">
-            {sectionStudents.length} Students
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-xs font-medium text-slate-500">{activeTeacherUser.subject} Average</div>
-          <div className="text-2xl font-bold text-emerald-600 font-mono mt-1 tabular-nums">
-            {classAvg}%
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-xs font-medium text-slate-500">Pass Rate (≥ 50%)</div>
-          <div className="text-2xl font-bold text-blue-600 font-mono mt-1 tabular-nums">
-            {passRate}%
-          </div>
-        </div>
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-xs font-medium text-slate-500">Attendance Rate</div>
-          <div className="text-2xl font-bold text-amber-600 font-mono mt-1 tabular-nums">
-            {attendanceRate}%
-          </div>
-        </div>
-      </div>
+        {/* Common Header Action Toolbar (Admin-suggested common place instead of floating in the middle) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Subject Selector */}
+            {availableSubjects.length > 1 && (
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="font-semibold text-slate-600">Subject:</span>
+                <select
+                  value={selectedSubjectId}
+                  onChange={(e) => setSelectedSubjectId(e.target.value)}
+                  className="bg-transparent font-bold text-slate-900 outline-none cursor-pointer"
+                >
+                  {availableSubjects.map((sub) => (
+                    <option key={sub.subjectId} value={sub.subjectId}>
+                      {sub.subjectName} ({sub.subjectAmharic})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-      {/* 3. CLASS MANAGEMENT TABS */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        {/* Navigation Tabs */}
-        <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-1.5 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('marks')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                activeTab === 'marks'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-            >
-              Gradebook & Marks
-            </button>
-            <button
-              onClick={() => setActiveTab('attendance')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                activeTab === 'attendance'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-            >
-              Daily Attendance
-            </button>
-            <button
-              onClick={() => setActiveTab('roster')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                activeTab === 'roster'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-            >
-              Class Roster & Parents
-            </button>
-            <button
-              onClick={() => setActiveTab('notices')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                activeTab === 'notices'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-            >
-              Homework & Bulletins
-            </button>
-            <button
-              disabled
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap text-slate-400 bg-slate-100/50 cursor-not-allowed flex items-center gap-1"
-              title="Additional academic modules coming soon"
-            >
-              <span>+ More Tools (Coming Soon)</span>
-            </button>
+            {/* Student Search Box */}
+            <div className="relative max-w-xs w-full">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search students in Section..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
           </div>
 
-          {/* Action Tools */}
+          {/* Contextual Action Buttons in Header */}
           <div className="flex items-center gap-2 flex-wrap">
             {activeTab === 'marks' && (
               <>
                 <button
                   type="button"
                   onClick={handleOpenAddColumnModal}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
                   title="Add customizable assessment column with custom max score and bonus points"
                 >
                   <Plus className="w-3.5 h-3.5 text-emerald-700" />
@@ -1326,14 +1464,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
                 <button
                   onClick={handleExportCSV}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  title="Download marks roster spreadsheet (CSV)"
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Export CSV</span>
                 </button>
+
                 <button
                   onClick={handleSaveMarks}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save Marks</span>
@@ -1342,18 +1482,58 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             )}
 
             {activeTab === 'attendance' && (
-              <button
-                onClick={handleMarkAllPresent}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Mark All Present
-              </button>
+              <>
+                <div className="inline-flex items-center bg-slate-100 rounded-xl p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceViewMode('spreadsheet')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      attendanceViewMode === 'spreadsheet'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Past Days Spreadsheet</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceViewMode('daily')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      attendanceViewMode === 'daily'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <CheckCircle className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Daily Roll Call</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExportAttendanceMatrixCSV}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  title="Export complete attendance matrix to CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Export Matrix CSV</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleMatrixMarkAllTodayPresent}
+                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  ✓ Mark Today All Present
+                </button>
+              </>
             )}
 
             {activeTab === 'notices' && (
               <button
                 onClick={() => setShowNewNoticeForm(!showNewNoticeForm)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
                 <span>Post Homework / Notice</span>
@@ -1363,33 +1543,183 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         </div>
 
         {saveSuccessMsg && (
-          <div className="p-3 bg-emerald-50 border-b border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between">
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-semibold flex items-center justify-between animate-in fade-in duration-200">
             <span>{saveSuccessMsg}</span>
           </div>
         )}
+      </div>
 
-        {/* Filter input */}
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4">
-          <div className="relative max-w-sm w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Filter by student name or ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+      {/* 2. STATS OVERVIEW FOR ACTIVE CLASS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-medium text-slate-500">Class Enrolled</div>
+          <div className="text-2xl font-bold text-slate-900 font-mono mt-1 tabular-nums">
+            {sectionStudents.length} Students
           </div>
-          <span className="text-xs text-slate-500 font-mono tabular-nums">
-            Showing {filteredStudents.length} of {sectionStudents.length} students
-          </span>
         </div>
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-medium text-slate-500">{activeTeacherUser.subject} Average</div>
+          <div className="text-2xl font-bold text-emerald-600 font-mono mt-1 tabular-nums">
+            {classAvg}%
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-medium text-slate-500">Pass Rate (≥ 50%)</div>
+          <div className="text-2xl font-bold text-blue-600 font-mono mt-1 tabular-nums">
+            {passRate}%
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="text-xs font-medium text-slate-500">Attendance Rate</div>
+          <div className="text-2xl font-bold text-amber-600 font-mono mt-1 tabular-nums">
+            {attendanceRate}%
+          </div>
+        </div>
+      </div>
 
+      {/* 3. SECTION MODULES SELECTOR (Cards to Open Specific Academic Workspaces) */}
+      <div className="space-y-2">
+        <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+          {lang === 'am' ? 'የክፍሉ የሥራ ክፍሎች (Section Modules)' : 'Section Academic Modules (Select to Open):'}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* Module 1: Gradebook & Marks */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('marks')}
+            className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between group ${
+              activeTab === 'marks'
+                ? 'bg-emerald-900 text-white border-emerald-950 shadow-md ring-2 ring-emerald-500'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-2xs hover:border-slate-300'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`p-2 rounded-xl text-base ${activeTab === 'marks' ? 'bg-white/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+                  📝
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'marks' ? 'bg-emerald-800 text-emerald-100 border border-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                  Base: {assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)} pts
+                </span>
+              </div>
+              <div className={`font-black text-sm ${activeTab === 'marks' ? 'text-white' : 'text-slate-900'}`}>
+                Gradebook & Marks
+              </div>
+              <div className={`text-[11px] mt-0.5 leading-snug ${activeTab === 'marks' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                Customizable assessment columns, scores & grades
+              </div>
+            </div>
+            <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'marks' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
+              <span>{activeTab === 'marks' ? 'Active Workspace' : 'Open Gradebook →'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
+          </button>
+
+          {/* Module 2: Attendance & Matrix */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('attendance')}
+            className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between group ${
+              activeTab === 'attendance'
+                ? 'bg-emerald-900 text-white border-emerald-950 shadow-md ring-2 ring-emerald-500'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-2xs hover:border-slate-300'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`p-2 rounded-xl text-base ${activeTab === 'attendance' ? 'bg-white/10 text-emerald-200' : 'bg-amber-50 text-amber-700'}`}>
+                  📅
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'attendance' ? 'bg-emerald-800 text-emerald-100 border border-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                  Rate: {attendanceRate}%
+                </span>
+              </div>
+              <div className={`font-black text-sm ${activeTab === 'attendance' ? 'text-white' : 'text-slate-900'}`}>
+                Attendance Spreadsheet
+              </div>
+              <div className={`text-[11px] mt-0.5 leading-snug ${activeTab === 'attendance' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                Past days matrix spreadsheet & roll calls
+              </div>
+            </div>
+            <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'attendance' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
+              <span>{activeTab === 'attendance' ? 'Active Workspace' : 'Open Attendance →'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
+          </button>
+
+          {/* Module 3: Class Roster & CTE */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('roster')}
+            className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between group ${
+              activeTab === 'roster'
+                ? 'bg-emerald-900 text-white border-emerald-950 shadow-md ring-2 ring-emerald-500'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-2xs hover:border-slate-300'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`p-2 rounded-xl text-base ${activeTab === 'roster' ? 'bg-white/10 text-emerald-200' : 'bg-blue-50 text-blue-700'}`}>
+                  👥
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'roster' ? 'bg-emerald-800 text-emerald-100 border border-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                  {sectionStudents.length} Students
+                </span>
+              </div>
+              <div className={`font-black text-sm ${activeTab === 'roster' ? 'text-white' : 'text-slate-900'}`}>
+                Class Roster & CTE
+              </div>
+              <div className={`text-[11px] mt-0.5 leading-snug ${activeTab === 'roster' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                Student dossiers, CTE vocational electives & parents
+              </div>
+            </div>
+            <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'roster' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
+              <span>{activeTab === 'roster' ? 'Active Workspace' : 'Open Roster →'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
+          </button>
+
+          {/* Module 4: Homework & Bulletins */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('notices')}
+            className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between group ${
+              activeTab === 'notices'
+                ? 'bg-emerald-900 text-white border-emerald-950 shadow-md ring-2 ring-emerald-500'
+                : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 shadow-2xs hover:border-slate-300'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`p-2 rounded-xl text-base ${activeTab === 'notices' ? 'bg-white/10 text-emerald-200' : 'bg-purple-50 text-purple-700'}`}>
+                  📢
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'notices' ? 'bg-emerald-800 text-emerald-100 border border-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                  {classNotices.filter((n) => n.section === selectedSection).length} Bulletins
+                </span>
+              </div>
+              <div className={`font-black text-sm ${activeTab === 'notices' ? 'text-white' : 'text-slate-900'}`}>
+                Homework & Bulletins
+              </div>
+              <div className={`text-[11px] mt-0.5 leading-snug ${activeTab === 'notices' ? 'text-emerald-100' : 'text-slate-500'}`}>
+                Assignments, due dates & reminders
+              </div>
+            </div>
+            <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'notices' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
+              <span>{activeTab === 'notices' ? 'Active Workspace' : 'Open Bulletins →'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* 4. ACTIVE SECTION WORKSPACE WORKAREA */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* TAB 1: MARKS & CONTINUOUS ASSESSMENT */}
         {activeTab === 'marks' && (
           <div className="overflow-x-auto">
             <div className="px-4 py-2.5 bg-emerald-50/70 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-emerald-950">
+              <div className="flex items-center gap-2 text-emerald-950 flex-wrap">
                 <BookOpen className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>
                   Active Subject: <strong className="font-bold">{currentSubjectObj?.subjectName || activeTeacherUser.subject}</strong> ({currentSubjectObj?.subjectAmharic || ''})
@@ -1404,7 +1734,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2.5 py-0.5 rounded border border-emerald-200">
+                <span className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2.5 py-0.5 rounded-lg border border-emerald-200">
                   Total Assessment Base:{' '}
                   <strong>{assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)} pts</strong>
                 </span>
@@ -1413,7 +1743,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   onClick={handleOpenAddColumnModal}
                   className="text-[11px] text-emerald-700 hover:text-emerald-950 font-bold underline cursor-pointer"
                 >
-                  + Add Item
+                  + Add Assessment Row/Column
                 </button>
               </div>
             </div>
@@ -1421,8 +1751,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                  <th className="py-3 px-3 text-center">#</th>
-                  <th className="py-3 px-4 min-w-[170px]">Student Name & ID</th>
+                  <th className="py-3 px-3 text-center w-12">#</th>
+                  <th className="py-3 px-4 min-w-[200px]">Student Name & ID</th>
                   {assessmentColumns.map((col) => (
                     <th key={col.id} className="py-3 px-2 text-center min-w-[120px]">
                       <div className="flex items-center justify-center gap-1">
@@ -1460,13 +1790,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                     </span>
                   </th>
                   <th className="py-3 px-3 text-center w-20">Grade</th>
-                  <th className="py-3 px-3 text-center w-24">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-900">
                 {filteredStudents.length === 0 ? (
                   <tr>
-                    <td colSpan={5 + assessmentColumns.length} className="py-8 text-center text-slate-500">
+                    <td colSpan={4 + assessmentColumns.length} className="py-8 text-center text-slate-500">
                       No students found in Section {selectedSection}.
                     </td>
                   </tr>
@@ -1478,8 +1807,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
                         <td className="py-3 px-4 font-semibold">
-                          <div>{student.fullName}</div>
-                          <div className="text-[11px] text-slate-500 font-mono">{student.studentId}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-slate-900">{student.fullName}</span>
+                            {student.cteSpecialization && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+                                🛠️ {student.cteSpecialization}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+                            <span>{student.studentId}</span>
+                            {student.fullNameAmharic && <span className="text-slate-400">({student.fullNameAmharic})</span>}
+                          </div>
                         </td>
 
                         {assessmentColumns.map((col) => {
@@ -1495,7 +1834,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                                 onChange={(e) =>
                                   handleCustomScoreChange(student.id, col.id, Number(e.target.value))
                                 }
-                                className={`w-16 text-center font-mono py-1 rounded border text-xs focus:ring-2 focus:ring-emerald-500 ${
+                                className={`w-16 text-center font-mono py-1 rounded-lg border text-xs focus:ring-2 focus:ring-emerald-500 ${
                                   col.isBonus
                                     ? 'border-amber-300 bg-amber-50/50 text-amber-950 font-bold'
                                     : 'border-slate-200 bg-white text-slate-900'
@@ -1511,23 +1850,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                         </td>
                         <td className="py-3 px-3 text-center font-mono font-bold">
                           <span
-                            className={`px-2 py-0.5 rounded text-[11px] ${
+                            className={`px-2.5 py-0.5 rounded text-[11px] ${
                               summary.percentage >= 80
-                                ? 'bg-emerald-50 text-emerald-800'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                                 : summary.percentage >= 50
-                                ? 'bg-blue-50 text-blue-800'
-                                : 'bg-rose-50 text-rose-800'
+                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                : 'bg-slate-100 text-slate-800 border border-slate-200'
                             }`}
                           >
                             {summary.letter.letter}
                           </span>
-                        </td>
-                        <td className="py-3 px-3 text-center font-medium">
-                          {summary.status === 'Pass' ? (
-                            <span className="text-emerald-700 font-semibold">Pass</span>
-                          ) : (
-                            <span className="text-rose-600 font-semibold">Fail</span>
-                          )}
                         </td>
                       </tr>
                     );
@@ -1538,65 +1870,243 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: DAILY ATTENDANCE */}
+        {/* TAB 2: HISTORICAL ATTENDANCE SPREADSHEET MATRIX & DAILY ROLL CALL */}
         {activeTab === 'attendance' && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                  <th className="py-3 px-3 text-center">#</th>
-                  <th className="py-3 px-4">Student ID & Name</th>
-                  <th className="py-3 px-4">Current Status</th>
-                  <th className="py-3 px-4 text-right">Update Today&apos;s Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-900">
-                {filteredStudents.map((student, idx) => {
-                  const currentStatus = student.attendanceStatus || 'Present';
-                  return (
-                    <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-slate-900">{student.fullName}</div>
-                        <div className="text-[11px] text-slate-500 font-mono">{student.studentId}</div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                            currentStatus === 'Present'
-                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                              : currentStatus === 'Absent'
-                              ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                              : currentStatus === 'Late'
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : 'bg-blue-50 text-blue-800 border border-blue-200'
-                          }`}
-                        >
-                          {currentStatus}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="inline-flex items-center gap-1.5">
-                          {(['Present', 'Absent', 'Late', 'Permission'] as const).map((status) => (
-                            <button
-                              key={status}
-                              onClick={() => handleAttendanceChange(student.id, status)}
-                              className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
-                                currentStatus === status
-                                  ? 'bg-slate-900 text-white'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            {attendanceViewMode === 'spreadsheet' ? (
+              <div className="space-y-3 p-4">
+                {/* Spreadsheet Info Header & Legend */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
+                    <div>
+                      <h4 className="font-black text-slate-900 text-sm">
+                        Historical Attendance Matrix (የቀናት አቴንዳንስ ማትሪክስ)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Past {attendanceDates.length} school days. Click any cell to cycle status: P (Present) → A (Absent) → L (Late) → E (Permission).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status Legend */}
+                  <div className="flex items-center gap-2 text-xs flex-wrap">
+                    <span className="flex items-center gap-1 font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <strong>P</strong> = Present
+                    </span>
+                    <span className="flex items-center gap-1 font-semibold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <strong>A</strong> = Absent
+                    </span>
+                    <span className="flex items-center gap-1 font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <strong>L</strong> = Late
+                    </span>
+                    <span className="flex items-center gap-1 font-semibold text-blue-800 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      <strong>E</strong> = Excused
+                    </span>
+                  </div>
+                </div>
+
+                {/* Matrix Table */}
+                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200">
+                        <th className="py-2.5 px-3 text-center w-10 sticky left-0 bg-slate-100 z-10">#</th>
+                        <th className="py-2.5 px-4 min-w-[190px] sticky left-10 bg-slate-100 z-10 border-r border-slate-200">
+                          Student Name & ID
+                        </th>
+                        {attendanceDates.map((dateStr, idx) => {
+                          const isToday = idx === attendanceDates.length - 1;
+                          const fmt = formatMatrixDate(dateStr);
+                          return (
+                            <th
+                              key={dateStr}
+                              className={`py-2 px-1 text-center min-w-[50px] border-r border-slate-200 ${
+                                isToday ? 'bg-emerald-100/80 text-emerald-950 font-black' : ''
                               }`}
                             >
-                              {status}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                              <div className="text-[10px] uppercase font-bold text-slate-500">{fmt.weekday}</div>
+                              <div className="font-mono text-xs font-black">{fmt.day}</div>
+                              <div className="text-[9px] text-slate-400">{fmt.month}</div>
+                              {isToday && (
+                                <span className="text-[8px] bg-emerald-700 text-white px-1 rounded-sm uppercase tracking-wider block font-bold">
+                                  Today
+                                </span>
+                              )}
+                            </th>
+                          );
+                        })}
+                        <th className="py-2.5 px-3 text-center w-16 bg-slate-50 border-r border-slate-200">Present</th>
+                        <th className="py-2.5 px-3 text-center w-16 bg-slate-50 border-r border-slate-200">Absent</th>
+                        <th className="py-2.5 px-3 text-center w-20 bg-emerald-50/50 text-emerald-900">Rate %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-900 bg-white">
+                      {filteredStudents.length === 0 ? (
+                        <tr>
+                          <td colSpan={5 + attendanceDates.length} className="py-8 text-center text-slate-500">
+                            No students enrolled in Section {selectedSection}.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredStudents.map((student, idx) => {
+                          const studentRecords = attendanceMatrix[student.id] || {};
+                          let presentCount = 0;
+                          let absentCount = 0;
+                          let lateCount = 0;
+
+                          attendanceDates.forEach((d) => {
+                            const st = studentRecords[d] || 'Present';
+                            if (st === 'Present') presentCount++;
+                            else if (st === 'Absent') absentCount++;
+                            else if (st === 'Late') lateCount++;
+                          });
+
+                          const totalDays = attendanceDates.length || 1;
+                          const ratePct = Math.round(((presentCount + lateCount * 0.5) / totalDays) * 100);
+
+                          return (
+                            <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-2 px-2 text-center text-slate-400 font-mono sticky left-0 bg-white">
+                                {idx + 1}
+                              </td>
+                              <td className="py-2 px-3 sticky left-10 bg-white border-r border-slate-200">
+                                <div className="font-bold text-slate-900 text-xs truncate max-w-[170px]">
+                                  {student.fullName}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
+                                  <span>{student.studentId}</span>
+                                  {student.cteSpecialization && (
+                                    <span className="text-[9px] font-bold text-violet-700 bg-violet-50 px-1.5 rounded border border-violet-200">
+                                      {student.cteSpecialization.split(' ')[0]}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {attendanceDates.map((dateStr, dIdx) => {
+                                const isToday = dIdx === attendanceDates.length - 1;
+                                const status = studentRecords[dateStr] || 'Present';
+                                return (
+                                  <td
+                                    key={dateStr}
+                                    className={`py-1.5 px-1 text-center border-r border-slate-100 ${
+                                      isToday ? 'bg-emerald-50/30' : ''
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMatrixCellClick(student.id, dateStr)}
+                                      className={`w-7 h-7 rounded-lg font-black text-xs transition-transform cursor-pointer hover:scale-110 shadow-2xs flex items-center justify-center mx-auto ${
+                                        status === 'Present'
+                                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200'
+                                          : status === 'Absent'
+                                          ? 'bg-rose-100 text-rose-900 border border-rose-300 hover:bg-rose-200'
+                                          : status === 'Late'
+                                          ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
+                                          : 'bg-blue-100 text-blue-900 border border-blue-300 hover:bg-blue-200'
+                                      }`}
+                                      title={`${formatMatrixDate(dateStr).full}: ${status} (Click to change)`}
+                                    >
+                                      {status === 'Present'
+                                        ? 'P'
+                                        : status === 'Absent'
+                                        ? 'A'
+                                        : status === 'Late'
+                                        ? 'L'
+                                        : 'E'}
+                                    </button>
+                                  </td>
+                                );
+                              })}
+
+                              <td className="py-2 px-2 text-center font-mono font-bold text-emerald-700 bg-slate-50/50 border-r border-slate-200">
+                                {presentCount}
+                              </td>
+                              <td className="py-2 px-2 text-center font-mono font-bold text-rose-600 bg-slate-50/50 border-r border-slate-200">
+                                {absentCount}
+                              </td>
+                              <td className="py-2 px-2 text-center font-mono font-bold text-slate-900 bg-emerald-50/30">
+                                {ratePct}%
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              /* Single-Day Roll Call Table */
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <th className="py-3 px-3 text-center">#</th>
+                    <th className="py-3 px-4">Student ID & Name</th>
+                    <th className="py-3 px-4">Current Status</th>
+                    <th className="py-3 px-4 text-right">Update Today&apos;s Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-900">
+                  {filteredStudents.map((student, idx) => {
+                    const currentStatus = student.attendanceStatus || 'Present';
+                    return (
+                      <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-slate-900">{student.fullName}</div>
+                          <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+                            <span>{student.studentId}</span>
+                            {student.cteSpecialization && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
+                                🛠️ {student.cteSpecialization}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                              currentStatus === 'Present'
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : currentStatus === 'Absent'
+                                ? 'bg-rose-50 text-rose-800 border border-rose-200'
+                                : currentStatus === 'Late'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : 'bg-blue-50 text-blue-800 border border-blue-200'
+                            }`}
+                          >
+                            {currentStatus}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="inline-flex items-center gap-1.5">
+                            {(['Present', 'Absent', 'Late', 'Permission'] as const).map((status) => (
+                              <button
+                                key={status}
+                                onClick={() => handleAttendanceChange(student.id, status)}
+                                className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
+                                  currentStatus === status
+                                    ? 'bg-slate-900 text-white'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {status}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
@@ -1617,6 +2127,14 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-200/80">
+                    {student.cteSpecialization && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500">CTE Elective:</span>
+                        <span className="font-bold text-violet-800 bg-violet-50 px-2 py-0.5 rounded-lg border border-violet-200 text-[11px]">
+                          🛠️ {student.cteSpecialization}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Gender:</span>
                       <span className="font-medium text-slate-900">{student.gender === 'F' ? 'Female' : 'Male'}</span>

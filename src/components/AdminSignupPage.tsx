@@ -52,8 +52,8 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Login credentials fields
-  const [loginIdentifier, setLoginIdentifier] = useState('admin');
-  const [loginPassword, setLoginPassword] = useState('debberhan2017');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,7 +193,11 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
                   required
                   value={loginIdentifier}
                   onChange={(e) => setLoginIdentifier(e.target.value)}
-                  placeholder="e.g. director@hailemariammamo.edu.et or admin"
+                  placeholder={
+                    lang === 'am'
+                      ? 'ኢሜይል ወይም መለያ ያስገቡ (ምሳሌ፡ director@hailemariammamo.edu.et)'
+                      : 'Enter administrator username or email (e.g. director@hailemariammamo.edu.et)'
+                  }
                   className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -210,7 +214,7 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
                   required
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Enter administrator passcode"
+                  placeholder={lang === 'am' ? 'የይለፍ ቃልዎን ያስገቡ' : 'Enter your password'}
                   className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <button
@@ -243,21 +247,6 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
               </button>
             </div>
           </form>
-
-          {/* Instructions for Manual User Creation in Supabase */}
-          <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 space-y-1.5">
-            <div className="font-semibold text-slate-900 flex items-center gap-1.5">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{lang === 'am' ? 'አዲስ አስተዳዳሪ በሱፓቤዝ ለመመዝገብ' : 'Administrator Credentials:'}</span>
-            </div>
-            <p className="leading-relaxed">
-              Default Director access for testing:
-            </p>
-            <div className="pt-1 border-t border-slate-200 flex items-center justify-between text-[11px]">
-              <span className="text-slate-500">Director account:</span>
-              <code className="text-slate-900 font-mono font-semibold bg-white border border-slate-200 px-1.5 py-0.5 rounded">admin / debberhan2017</code>
-            </div>
-          </div>
 
           {/* Public Preview Alternative */}
           <div className="mt-5 pt-4 border-t border-slate-100 text-center">

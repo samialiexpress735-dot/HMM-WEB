@@ -476,9 +476,6 @@ export default function App() {
                     ? '🔒 የሬጅስትራር ክፍል ደህንነት፡ የተማሪዎች ምዝገባ እና ክፍል ድልድልን ለመጠቀም የአስተዳዳሪ መለያ ያስፈልጋል።'
                     : '🔒 Administrative Security: Official School Director or Registrar Officer credentials required to access student intake & section allocation.'}
                 </span>
-                <span className="text-[11px] font-mono bg-white px-2 py-0.5 rounded border border-amber-200">
-                  Key: debberhan2017
-                </span>
               </div>
               <AdminSignupPage
                 onAdminAuthenticated={handleAdminAuthenticated}

@@ -209,7 +209,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     e.preventDefault();
     if (!fullName.trim()) return;
 
-    const newStudentId = `HMM-2019-${targetGrade.toString().padStart(2, '0')}${String(
+    const newStudentId = `HMM-2017-${targetGrade.toString().padStart(2, '0')}${String(
       registeredStudents.length + 1
     ).padStart(2, '0')}`;
 
@@ -222,7 +222,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       targetGrade,
       stream: targetGrade >= 11 ? targetStream : undefined,
       cteSpecialization: targetGrade >= 11 ? cteSpecialization : undefined,
-      academicYear: '2019 E.C.',
+      academicYear: '2017 E.C.',
       previousSchool: previousSchool.trim() || 'Debre Berhan Feeder School',
       previousGrade,
       previousSection,
@@ -247,12 +247,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     setGuardianName('');
     alert(
       lang === 'am'
-        ? `ተማሪ ${newStudent.fullNameAmharic} ለ2019 ዓ.ም. በ${targetGrade}ኛ ክፍል ${
+        ? `ተማሪ ${newStudent.fullNameAmharic} ለ2017 ዓ.ም. በ${targetGrade}ኛ ክፍል ${
             targetGrade >= 11
               ? `(${targetStream === 'Natural Science' ? 'የተፈጥሮ ሳይንስ' : 'የማህበራዊ ሳይንስ'} - ${cteSpecialization})`
               : ''
           } በተሳካ ሁኔታ ተመዝግቧል!`
-        : `Student ${newStudent.fullName} successfully registered for 2019 E.C. Grade ${targetGrade}${
+        : `Student ${newStudent.fullName} successfully registered for 2017 E.C. Grade ${targetGrade}${
             targetGrade >= 11 ? ` (${targetStream} - ${cteSpecialization})` : ''
           }!`
     );
@@ -302,6 +302,72 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     setShowCommitSuccessModal(false);
   };
 
+  // Generate Grade 11 & 12 CTE Practical Cohort Sections (Cross-Homeroom Grouping)
+  const handleGenerateCteSections = () => {
+    const grade = allocationGrade >= 11 ? allocationGrade : 11;
+    const candidates = registeredStudents.filter((s) => s.targetGrade === grade && s.cteSpecialization);
+
+    if (candidates.length === 0) {
+      alert(
+        lang === 'am'
+          ? `ለ${grade}ኛ ክፍል የስራና ቴክኒክ (CTE) ሙያ የመረጡ ተማሪዎች አልተገኙም!`
+          : `No registered Grade ${grade} students found with selected CTE specializations! Please register students with CTE electives first.`
+      );
+      return;
+    }
+
+    const specDefs = [
+      { id: 'web-dev', labelEn: 'Web Design and Development', code: 'WD' },
+      { id: 'accounting', labelEn: 'Accounting', code: 'ACC' },
+      { id: 'marketing', labelEn: 'Marketing', code: 'MKT' },
+      { id: 'construction', labelEn: 'Construction', code: 'CST' }
+    ];
+
+    const cteBuckets: SectionAllocationBucket[] = [];
+
+    specDefs.forEach((def, idx) => {
+      const matched = candidates.filter((st) => {
+        const c = (st.cteSpecialization || '').toLowerCase();
+        return c.includes(def.labelEn.toLowerCase()) || c.includes(def.id) || c.includes(def.code.toLowerCase());
+      });
+
+      if (matched.length > 0) {
+        const maleCount = matched.filter((s) => s.gender === 'M').length;
+        const femaleCount = matched.filter((s) => s.gender === 'F').length;
+        const avgScore = Math.round(
+          matched.reduce((acc, s) => acc + (s.previousAverageScore || 80), 0) / matched.length
+        );
+
+        cteBuckets.push({
+          sectionCode: `${grade}-CTE-${def.code}`,
+          sectionLetter: `CTE-${def.code}`,
+          students: matched,
+          maleCount,
+          femaleCount,
+          averageScore: avgScore,
+          maxCapacity: 50,
+          roomNumber: `Tech Lab ${idx + 1}`,
+          isCteSection: true,
+          cteSpecialization: def.labelEn
+        });
+      }
+    });
+
+    if (cteBuckets.length === 0) {
+      alert('No matching students found for CTE cohorts.');
+      return;
+    }
+
+    setPreviewBuckets(cteBuckets);
+    setAllocationSuccessMessage(
+      lang === 'am'
+        ? `ለ${grade}ኛ ክፍል ${cteBuckets.length} የCTE ሙያ ክፍሎች (${cteBuckets.map((b) => b.sectionCode).join(', ')}) በተሳካ ሁኔታ ተዘጋጅተዋል!`
+        : `Generated ${cteBuckets.length} specialized CTE Cohort Sections (${cteBuckets.map((b) => b.sectionCode).join(', ')}) based on student vocational electives!`
+    );
+    setHasCommittedCurrentPreview(false);
+    setShowCommitSuccessModal(false);
+  };
+
   // Move Student from one preview section to another
   const handleMoveStudent = (studentId: string, targetSectionCode: string) => {
     if (!previewBuckets) return;
@@ -312,12 +378,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Export Allocation Rosters to Official CSV
   const handleDownloadCsv = () => {
     if (!previewBuckets || previewBuckets.length === 0) return;
-    const csvContent = generateSectionRosterCsv(previewBuckets, '2019 E.C.');
+    const csvContent = generateSectionRosterCsv(previewBuckets, '2017 E.C.');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_2019_EC.csv`);
+    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_2017_EC.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -334,7 +400,6 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
     // Create GradeSection objects with empty assigned teachers as requested
     const newGradeSections: GradeSection[] = previewBuckets.map((bucket, idx) => {
-      // Pick standard subject template
       let standardSubjects = STANDARD_GRADE_9_10_SUBJECTS;
       if (allocationGrade >= 11) {
         standardSubjects =
@@ -343,28 +408,46 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
       }
 
-      // Empty the assigned teachers as specified by the user
-      const emptySubjects = standardSubjects.map((sub) => ({
-        ...sub,
-        teacherId: '',
-        teacherName: lang === 'am' ? 'ያልተመደበ (Unassigned)' : 'Unassigned (ያልተመደበ)'
-      }));
+      // Empty assigned teachers initially
+      const emptySubjects = bucket.isCteSection
+        ? [
+            {
+              subjectId: 'cte',
+              subjectName: `Career & Technical Education: ${bucket.cteSpecialization || 'Elective'}`,
+              subjectAmharic: `የስራና ቴክኒክ፡ ${bucket.cteSpecialization || 'ሙያ'}`,
+              teacherId: '',
+              teacherName: lang === 'am' ? 'ያልተመደበ (Unassigned)' : 'Unassigned (ያልተመደበ)',
+              periodsPerWeek: 4
+            }
+          ]
+        : standardSubjects.map((sub) => ({
+            ...sub,
+            teacherId: '',
+            teacherName: lang === 'am' ? 'ያልተመደበ (Unassigned)' : 'Unassigned (ያልተመደበ)'
+          }));
 
-      const streamName = allocationGrade >= 11 ? allocationStream : 'General Secondary';
-      const streamAmharic =
-        allocationGrade >= 11
-          ? allocationStream === 'Natural Science'
-            ? 'የተፈጥሮ ሳይንስ'
-            : 'የማህበራዊ ሳይንስ'
-          : 'አጠቃላይ 2ኛ ደረጃ';
+      const streamName = bucket.isCteSection
+        ? `CTE Vocational: ${bucket.cteSpecialization}`
+        : allocationGrade >= 11
+        ? allocationStream
+        : 'General Secondary';
+      const streamAmharic = bucket.isCteSection
+        ? `የስራና ቴክኒክ፡ ${bucket.cteSpecialization}`
+        : allocationGrade >= 11
+        ? allocationStream === 'Natural Science'
+          ? 'የተፈጥሮ ሳይንስ'
+          : 'የማህበራዊ ሳይንስ'
+        : 'አጠቃላይ 2ኛ ደረጃ';
 
       return {
-        id: `sec-2019-${bucket.sectionCode.toLowerCase()}`,
+        id: `sec-2017-${bucket.sectionCode.toLowerCase()}`,
         grade: allocationGrade,
         section: bucket.sectionCode,
         sectionLetter: bucket.sectionLetter,
-        stream: streamName,
+        stream: streamName as any,
         streamAmharic,
+        isCteSection: bucket.isCteSection || false,
+        cteSpecialization: bucket.cteSpecialization,
         totalStudents: bucket.students.length,
         maleStudents: bucket.maleCount,
         femaleStudents: bucket.femaleCount,
@@ -382,8 +465,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
           deputyMonitor: bucket.students[1]?.fullName || 'To be elected'
         },
         subjectAssignments: emptySubjects,
-        roomNumber: bucket.roomNumber || `Room 20${idx + 1}`,
-        buildingBlock: `Block 2019-${bucket.sectionLetter}`,
+        roomNumber: bucket.roomNumber || `Room ${idx + 1}`,
+        buildingBlock: `Block ${bucket.sectionLetter}`,
         shift: idx % 2 === 0 ? 'Morning Shift (ጧት)' : 'Afternoon Shift (ከሰዓት)',
         attendanceToday: 100,
         isDemoAvailable: false
@@ -402,54 +485,88 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       prev.map((s) => (allocatedMap.has(s.id) ? { ...s, allocatedSection: allocatedMap.get(s.id) } : s))
     );
 
-    // If onUpdateStudents is provided, also convert to active school students so they appear in Student Portal
+    // Also convert to active school students with properly initialized subjects (0 initial score)
     if (onUpdateStudents) {
-      const convertedStudents = previewBuckets.flatMap((bucket) =>
-        bucket.students.map((st, idx) => ({
-          id: st.id,
-          studentId: st.studentId,
-          fullName: st.fullName,
-          fullNameAmharic: st.fullNameAmharic,
-          grade: allocationGrade,
-          section: bucket.sectionLetter,
-          stream: st.stream,
-          academicYear: '2019 E.C.',
-          homeroomTeacher: 'To be assigned',
-          attendanceRate: 100,
-          rank: idx + 1,
-          totalStudentsInSection: bucket.students.length,
-          semesters: [
-            {
-              semester: 1 as const,
-              subjects: [
+      let templateSubjects = STANDARD_GRADE_9_10_SUBJECTS;
+      if (allocationGrade >= 11) {
+        templateSubjects =
+          allocationStream === 'Social Science'
+            ? STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
+            : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
+      }
+
+      const convertedStudents = previewBuckets.flatMap((bucket) => {
+        return bucket.students.map((st, idx) => {
+          const studentSubjects = (bucket.isCteSection
+            ? [
                 {
-                  subjectId: 'math',
-                  subjectName: 'Mathematics',
-                  continuousAssessment: 42,
-                  midExam: 25,
-                  finalExam: 28,
-                  totalScore: 95
+                  subjectId: 'cte',
+                  subjectName: `Career & Technical: ${st.cteSpecialization || 'Elective'}`,
+                  subjectAmharic: `የስራና ቴክኒክ፡ ${st.cteSpecialization || 'ሙያ'}`,
+                  teacherName: 'Unassigned',
+                  periodsPerWeek: 4
                 }
               ]
-            }
-          ]
-        }))
-      );
-      onUpdateStudents((prev: any) => [...prev, ...convertedStudents]);
+            : templateSubjects
+          ).map((ts) => ({
+            subjectId: ts.subjectId,
+            subjectName: ts.subjectName,
+            subjectAmharic: ts.subjectAmharic || ts.subjectName,
+            teacherName: ts.teacherName || 'Unassigned',
+            continuousAssessment: 0,
+            midExam: 0,
+            finalExam: 0,
+            totalScore: 0
+          }));
+
+          return {
+            id: st.id,
+            studentId: st.studentId,
+            fullName: st.fullName,
+            fullNameAmharic: st.fullNameAmharic || st.fullName,
+            gender: st.gender,
+            grade: allocationGrade,
+            section: bucket.sectionLetter,
+            stream: st.stream,
+            cteSpecialization: st.cteSpecialization,
+            academicYear: '2017 E.C.',
+            homeroomTeacher: 'To be assigned',
+            guardianName: st.guardianName || 'Parent/Guardian',
+            guardianPhone: st.guardianPhone || '+251 91 000 0000',
+            conduct: st.conduct || 'A',
+            attendanceRate: 100,
+            rank: idx + 1,
+            totalStudentsInSection: bucket.students.length,
+            semesters: [
+              {
+                semester: 1 as const,
+                subjects: studentSubjects
+              },
+              {
+                semester: 2 as const,
+                subjects: studentSubjects
+              }
+            ]
+          };
+        });
+      });
+
+      onUpdateStudents((prev: any) => {
+        const prevArr = Array.isArray(prev) ? prev : [];
+        const newIds = new Set(convertedStudents.map((s) => s.id));
+        const kept = prevArr.filter((s: any) => !newIds.has(s.id));
+        return [...kept, ...convertedStudents];
+      });
     }
 
     setAllocationSuccessMessage(
       lang === 'am'
-        ? `በ2019 ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
+        ? `በ2017 ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
             .map((b) => b.sectionCode)
-            .join(
-              ', '
-            )}) በተሳካ ሁኔታ ተፈጥረዋል! መምህራን እስካሁን ስላልተመደቡ እባክዎ ከታች ወይም በክፍሎች ገጽ ላይ ያለ ግጭት ይመድቡ።`
-        : `Successfully created ${previewBuckets.length} new 2019 E.C. sections (${previewBuckets
+            .join(', ')}) በተሳካ ሁኔታ ተፈጥረዋል!`
+        : `Successfully created ${previewBuckets.length} new 2017 E.C. sections (${previewBuckets
             .map((b) => b.sectionCode)
-            .join(
-              ', '
-            )}) with room assignments and merit/gender balancing! Assigned teachers are initially empty. You can now configure period schedules below without clashing periods.`
+            .join(', ')}) with room assignments and merit/gender balancing!`
     );
 
     setHasCommittedCurrentPreview(true);
@@ -646,28 +763,28 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 shadow-sm flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
-                2019 E.C. Academic Year Opening
+                2017 E.C. Academic Year Intake
               </span>
               <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-800/90 text-emerald-200 border border-emerald-700">
-                የ2019 ዓ.ም. የተማሪዎች ምዝገባ ቢሮ
+                የ2017 ዓ.ም. የተማሪዎች ምዝገባ ቢሮ
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               {lang === 'am'
-                ? 'የ2019 ዓ.ም. አዲስ ዓመት ምዝገባ፣ የክፍል ድልድልና የመምህራን ክፍለ-ጊዜ ምደባ'
-                : '2019 E.C. Registrar Desk, Section Allocator & Timetable Manager'}
+                ? 'የ2017 ዓ.ም. አዲስ ዓመት ምዝገባ፣ የክፍል ድልድልና የመምህራን ክፍለ-ጊዜ ምደባ'
+                : '2017 E.C. Registrar Desk, Section Allocator & Timetable Manager'}
             </h1>
             <p className="text-xs sm:text-sm text-emerald-100/90 max-w-3xl">
               {lang === 'am'
-                ? 'ያለፈው ዓመት (2018 ዓ.ም.) ተማሪዎችን በመፈለግ በስማቸው አውቶኮምፕሊት ይመዝግቡ፣ በዘፈቀደ ወይም በፆታ ሚዛን ክፍሎችን ያዋቅሩ፣ እንዲሁም የመምህራንን ክፍለ-ጊዜ ያለ ምንም ግጭት ያደራጁ።'
-                : 'Intelligently autocomplete applicant data from 2018 E.C. feeder schools, auto-allocate students into sections, and assign teachers without period timetable clashes.'}
+                ? 'የቀድሞ ተማሪዎችን በመፈለግ በስማቸው አውቶኮምፕሊት ይመዝግቡ፣ በዘፈቀደ ወይም በፆታ ሚዛን ክፍሎችን ያዋቅሩ፣ እንዲሁም የመምህራንን ክፍለ-ጊዜ ያለ ምንም ግጭት ያደራጁ።'
+                : 'Intelligently autocomplete applicant data from feeder schools, auto-allocate students into sections, and assign teachers without period timetable clashes.'}
             </p>
           </div>
 
           {/* Quick Metrics */}
           <div className="flex items-center gap-3">
             <div className="bg-slate-800/80 backdrop-blur-sm border border-emerald-700/50 p-4 rounded-2xl text-center min-w-[110px]">
-              <span className="text-[10px] uppercase font-bold text-emerald-300 block">Registered (2019)</span>
+              <span className="text-[10px] uppercase font-bold text-emerald-300 block">Registered (2017)</span>
               <span className="text-2xl font-black text-amber-400">{registeredStudents.length}</span>
               <span className="text-[10px] text-slate-400 block">Applicants</span>
             </div>
@@ -772,16 +889,16 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
                   <UserPlus className="w-5 h-5 text-emerald-700" />
                   <span>
-                    {lang === 'am' ? 'የአዲስ ተማሪ ምዝገባ ፎርም (2019 ዓ.ም.)' : '2019 E.C. Student Admission Form'}
+                    {lang === 'am' ? 'የአዲስ ተማሪ ምዝገባ ፎርም (2017 ዓ.ም.)' : '2017 E.C. Student Admission Form'}
                   </span>
                 </h3>
-                <span className="text-[11px] font-bold text-slate-500">Academic Year: 2019 E.C.</span>
+                <span className="text-[11px] font-bold text-slate-500">Academic Year: 2017 E.C.</span>
               </div>
 
               {/* Target Grade Selector */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  {lang === 'am' ? 'ተማሪው በ2019 ዓ.ም. የሚገባበት ክፍል (Target Grade to Join):' : 'Target Grade to Join in 2019 E.C.:'}
+                  {lang === 'am' ? 'ተማሪው በ2017 ዓ.ም. የሚገባበት ክፍል (Target Grade to Join):' : 'Target Grade to Join in 2017 E.C.:'}
                 </label>
                 <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
                   {[9, 10, 11, 12].map((g) => (
@@ -1093,27 +1210,27 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
                 <div className="flex items-center justify-between pt-2">
                   <span className="text-[11px] text-slate-500">
-                    Will be registered under <strong>2019 E.C. Admission Pool</strong>
+                    Will be registered under <strong>2017 E.C. Admission Pool</strong>
                   </span>
                   <button
                     type="submit"
                     className="btn-animated px-5 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-2"
                   >
                     <CheckCircle2 className="w-4 h-4 text-amber-400" />
-                    <span>{lang === 'am' ? 'ተማሪውን መዝግብ (Register)' : 'Confirm 2019 Registration'}</span>
+                    <span>{lang === 'am' ? 'ተማሪውን መዝግብ (Register)' : 'Confirm 2017 Registration'}</span>
                   </button>
                 </div>
               </form>
             </div>
 
-            {/* Right Panel: Registered 2019 Cohort List */}
+            {/* Right Panel: Registered 2017 Cohort List */}
             <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div>
                   <h3 className="font-black text-slate-900 text-sm flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-emerald-700" />
                     <span>
-                      {lang === 'am' ? 'የ2019 ዓ.ም. የተመዘገቡ ተማሪዎች' : 'Registered 2019 E.C. Applicants'}
+                      {lang === 'am' ? 'የ2017 ዓ.ም. የተመዘገቡ ተማሪዎች' : 'Registered 2017 E.C. Applicants'}
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
@@ -1406,16 +1523,34 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 <span className="text-[11px] text-slate-500">students / section</span>
               </div>
 
-              <button
-                type="button"
-                onClick={handleGenerateAllocation}
-                className="btn-animated px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-black rounded-xl shadow-sm cursor-pointer flex items-center gap-2"
-              >
-                <Shuffle className="w-4 h-4 text-amber-400" />
-                <span>
-                  {lang === 'am' ? 'ክፍሎችን አዘጋጅና ገምግም (Generate Preview)' : 'Generate & Preview Balanced Sections'}
-                </span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {allocationGrade >= 11 && (
+                  <button
+                    type="button"
+                    onClick={handleGenerateCteSections}
+                    className="btn-animated px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-black rounded-xl shadow-sm cursor-pointer flex items-center gap-1.5"
+                    title="Group Grade 11 & 12 students into specialized CTE vocational sections (Web Dev, Marketing, Accounting, Construction)"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>
+                      {lang === 'am'
+                        ? 'የCTE ሙያ ክፍሎች ድልድል (CTE Cohorts)'
+                        : `Generate Grade ${allocationGrade} CTE Sections`}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleGenerateAllocation}
+                  className="btn-animated px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-black rounded-xl shadow-sm cursor-pointer flex items-center gap-2"
+                >
+                  <Shuffle className="w-4 h-4 text-amber-400" />
+                  <span>
+                    {lang === 'am' ? 'መደበኛ ክፍሎችን አዘጋጅ (Generate Homerooms)' : 'Generate & Preview Balanced Sections'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1461,7 +1596,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       className="btn-animated px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
                     >
                       <CheckCircle2 className="w-4 h-4 text-emerald-950" />
-                      <span>{lang === 'am' ? 'ክፍሎችን አፅድቅና መዝግብ' : 'Confirm & Commit 2019 Sections'}</span>
+                      <span>{lang === 'am' ? 'ክፍሎችን አፅድቅና መዝግብ' : 'Confirm & Commit 2017 Sections'}</span>
                     </button>
                   )}
                 </div>
@@ -1558,6 +1693,14 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                                   <span>{st.gender === 'F' ? 'Female' : 'Male'}</span>
                                   <span>•</span>
                                   <span className="font-bold text-amber-700">{st.previousAverageScore}%</span>
+                                  {st.cteSpecialization && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="font-bold text-purple-700 bg-purple-50 px-1 py-0.2 rounded border border-purple-200">
+                                        CTE: {st.cteSpecialization}
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1892,7 +2035,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                    2019 E.C. Academic Registry
+                    2017 E.C. Academic Registry
                   </span>
                   <h3 className="text-xl font-black text-white mt-1">
                     {lang === 'am' ? 'ክፍሎች በተሳካ ሁኔታ ተመዝግበዋል!' : 'Sections Successfully Committed!'}
@@ -1906,7 +2049,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900 text-xs leading-relaxed space-y-2">
                 <p className="font-bold">
                   {lang === 'am'
-                    ? `የ2019 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
+                    ? `የ2017 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
                     : `Successfully recorded ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} sections (${(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).join(', ')}) into the school active roster.`}
                 </p>
                 <p className="text-emerald-700 text-[11px]">

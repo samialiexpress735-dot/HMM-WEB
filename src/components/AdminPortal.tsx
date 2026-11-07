@@ -440,7 +440,58 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   );
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Unified Executive Admin Top Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <div className="px-3.5 py-2 bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs">
+            <Shield className="w-3.5 h-3.5 text-amber-400" />
+            <span>{lang === 'am' ? 'የአስተዳዳሪ ዴስክ' : 'Admin Suite'}</span>
+          </div>
+          {onNavigateToRegistrar && (
+            <button
+              onClick={onNavigateToRegistrar}
+              className="btn-animated px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-950" />
+              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : '2017 Registrar Desk →'}</span>
+            </button>
+          )}
+          {onNavigateToGrades && (
+            <button
+              onClick={onNavigateToGrades}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{lang === 'am' ? 'የዘንድሮ ክፍሎች →' : 'Grades of This Year →'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {onNavigateHome && (
+            <button
+              onClick={onNavigateHome}
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="View Public School Website"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{lang === 'am' ? 'ድረ-ገጽ' : 'Public Site'}</span>
+            </button>
+          )}
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+              title="Sign out of Administrator Suite"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{lang === 'am' ? 'ውጣ' : 'Sign Out'}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* MoE Ethiopia Styled Header Card */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="moe-gradient-bar" />
@@ -640,37 +691,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          {activeAdminTab === 'credentials' && (
-            <button
-              onClick={() => window.print()}
-              className="btn-animated px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-sm cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-amber-400" />
-              <span>Print Section {selectedSection} Credential Slips</span>
-            </button>
-          )}
-
-          {onNavigateToRegistrar && (
-            <button
-              onClick={onNavigateToRegistrar}
-              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4 text-emerald-950" />
-              <span>{lang === 'am' ? 'ምዝገባ (2019 ዓ.ም.) →' : '2019 Registrar Desk →'}</span>
-            </button>
-          )}
-
-          {onNavigateToGrades && (
-            <button
-              onClick={onNavigateToGrades}
-              className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Layers className="w-4 h-4 text-emerald-700" />
-              <span>{lang === 'am' ? 'የዘንድሮ ክፍሎች →' : 'Grades of This Year →'}</span>
-            </button>
-          )}
-        </div>
+        {activeAdminTab === 'credentials' && (
+          <button
+            onClick={() => window.print()}
+            className="btn-animated px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-sm cursor-pointer shrink-0"
+          >
+            <Printer className="w-4 h-4 text-amber-400" />
+            <span>Print Section {selectedSection} Credential Slips</span>
+          </button>
+        )}
       </nav>
 
       {/* Feedback Success Notice */}
@@ -710,7 +739,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     className="px-4 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl flex items-center gap-2 shadow-sm transition-transform cursor-pointer hover:scale-105"
                   >
                     <Shuffle className="w-4 h-4 text-emerald-950" />
-                    <span>Distribute Sections (2019)</span>
+                    <span>Distribute Sections (2017 E.C.)</span>
                   </button>
                 )}
 
@@ -824,7 +853,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <Shuffle className="w-5 h-5 text-emerald-800" />
                 </div>
                 <h4 className="font-extrabold text-slate-900 text-sm group-hover:text-emerald-800">
-                  Section Balancing (2019)
+                  Section Balancing (2017 E.C.)
                 </h4>
                 <p className="text-xs text-slate-500">
                   Automated gender/merit distribution, capacity limits, and student drag/drop transfers.
@@ -1760,7 +1789,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <div className="max-w-md mx-auto space-y-1">
                   <h4 className="font-bold text-slate-900 text-base">No Students Enrolled Yet</h4>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Student rosters can be enrolled individually using the Quick Enroll button or imported in bulk from Feeder Schools via the 2019 Registrar Allocator.
+                    Student rosters can be enrolled individually using the Quick Enroll button or imported in bulk from Feeder Schools via the 2017 Registrar Allocator.
                   </p>
                 </div>
                 <div className="flex items-center justify-center gap-3 pt-2">
@@ -1775,7 +1804,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onClick={onNavigateToRegistrar}
                       className="px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer"
                     >
-                      Go to Section Allocator (2019) →
+                      Go to Section Allocator (2017 E.C.) →
                     </button>
                   )}
                 </div>
@@ -1836,6 +1865,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             <span className="text-[10px] text-slate-400 block font-medium">
                               {s.stream || 'General Secondary'}
                             </span>
+                            {s.cteSpecialization && (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                                CTE: {s.cteSpecialization}
+                              </span>
+                            )}
                           </div>
                         </div>
 

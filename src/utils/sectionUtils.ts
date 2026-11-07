@@ -122,7 +122,22 @@ export function getStudentsForSection(
   const targetStream = activeSectionObj?.stream;
 
   return students.filter((s) => {
-    // 1. Direct allocatedSection match (e.g. from 2019 registrar allocation)
+    // 0. Specialized CTE Section check (cross-homeroom cohort for Grade 11 & 12)
+    if (activeSectionObj?.isCteSection || targetUpper.includes('CTE')) {
+      if (s.grade !== targetGrade) return false;
+      const targetCte = (activeSectionObj?.cteSpecialization || '').toLowerCase().trim();
+      const studentCte = (s.cteSpecialization || '').toLowerCase().trim();
+      if (targetCte && studentCte) {
+        return studentCte.includes(targetCte) || targetCte.includes(studentCte);
+      }
+      if (targetUpper.includes('WD') && (studentCte.includes('web') || studentCte.includes('wd'))) return true;
+      if (targetUpper.includes('ACC') && (studentCte.includes('account') || studentCte.includes('acc'))) return true;
+      if (targetUpper.includes('MKT') && (studentCte.includes('market') || studentCte.includes('mkt'))) return true;
+      if (targetUpper.includes('CST') && (studentCte.includes('construct') || studentCte.includes('cst'))) return true;
+      return Boolean(s.cteSpecialization);
+    }
+
+    // 1. Direct allocatedSection match (e.g. from registrar allocation)
     const allocatedSec = (s as any).allocatedSection;
     if (allocatedSec && String(allocatedSec).toUpperCase().trim() === targetUpper) {
       return true;
