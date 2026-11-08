@@ -516,7 +516,9 @@ export async function fetchSectionsFromCloud(): Promise<GradeSection[]> {
       buildingBlock: s.building_block || 'Block A',
       shift: s.shift || 'Morning Shift (ጧት)',
       subjectAssignments: s.subject_assignments || [],
-      attendanceToday: 0
+      attendanceToday: 0,
+      isCteSection: Boolean(s.is_cte_section) || /-CTE-/i.test(s.section_code || ''),
+      cteSpecialization: s.cte_specialization || undefined
     }));
   } catch {
     return [];
@@ -527,7 +529,7 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
   const client = getSupabaseClient();
   if (!client) return false;
   try {
-    const { error } = await client.from('grade_sections').upsert({
+    const base = {
       id: section.id,
       grade: section.grade,
       section_code: section.section,
@@ -539,12 +541,26 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
       female_students: section.femaleStudents,
       homeroom_teacher_name: section.homeroomTeacher?.name,
       room_number: section.roomNumber,
+      building_block: section.buildingBlock || null,
       shift: section.shift,
       subject_assignments: section.subjectAssignments || [],
       student_monitors: section.studentMonitors || null,
       updated_at: new Date().toISOString()
-    });
-    return !error;
+    };
+    const cte = {
+      is_cte_section: Boolean(section.isCteSection),
+      cte_specialization: section.cteSpecialization || null
+    };
+    const { error } = await client.from('grade_sections').upsert({ ...base, ...cte });
+    if (!error) return true;
+
+    // The CTE columns do not exist until supabase/add_cte_sections.sql has been run. Save everything else anyway.
+    if (/is_cte_section|cte_specialization|column/i.test(error.message || '')) {
+      console.warn('CTE section columns missing: run supabase/add_cte_sections.sql. Saved without the CTE flag.');
+      const retry = await client.from('grade_sections').upsert(base);
+      return !retry.error;
+    }
+    return false;
   } catch {
     return false;
   }

@@ -271,3 +271,8 @@ ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_choices        TEXT;
 ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_specialization TEXT;  -- track the student was placed in
 ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_rank           INT;   -- which choice was granted (1-4)
 ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_section        TEXT;  -- e.g. 11-CTE-WD
+
+-- CTE sections (also available alone as supabase/add_cte_sections.sql)
+ALTER TABLE grade_sections ADD COLUMN IF NOT EXISTS is_cte_section     BOOLEAN DEFAULT false;
+ALTER TABLE grade_sections ADD COLUMN IF NOT EXISTS cte_specialization TEXT;  -- e.g. 'Web Design and Development'
+UPDATE grade_sections SET is_cte_section = true WHERE section_code LIKE '%-CTE-%' AND is_cte_section IS NOT TRUE;
