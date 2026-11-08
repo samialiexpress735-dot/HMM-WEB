@@ -53,6 +53,7 @@ export function getSectionsAssignedToTeacher(
   teacher.sectionsTeaching?.forEach((secCode) => {
     if (
       secCode &&
+      secCode !== 'Not assigned yet' &&
       secCode !== 'To be assigned in Grades of This Year' &&
       secCode !== 'Unassigned'
     ) {

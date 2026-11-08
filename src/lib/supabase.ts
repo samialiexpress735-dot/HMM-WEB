@@ -686,7 +686,7 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         totalStudentsInSection: Number(s.total_students_in_section || 40),
         attendanceRate: Number(s.attendance_rate || 95),
         conduct: s.conduct || 'A',
-        homeroomTeacher: s.homeroom_teacher || 'Assigned in Grades of This Year',
+        homeroomTeacher: !s.homeroom_teacher || s.homeroom_teacher === 'Assigned in Grades of This Year' ? 'Not assigned yet' : s.homeroom_teacher,
         guardianName: s.guardian_name || 'Parent / Guardian',
         guardianPhone: s.guardian_phone || '',
         avatar: s.avatar || '',

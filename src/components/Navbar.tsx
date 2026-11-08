@@ -52,13 +52,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   const publicNavItems = [
     { id: 'home', labelEn: 'Home', labelAm: 'መነሻ', icon: Building },
     { id: 'portal', labelEn: 'Student Grades', labelAm: 'የተማሪ ውጤት', icon: Award },
-    { id: 'teacher', labelEn: 'Teacher Desk', labelAm: 'መምህራን', icon: FileSpreadsheet },
+    { id: 'teacher', labelEn: 'Teacher portal', labelAm: 'መምህራን', icon: FileSpreadsheet },
     { id: 'calendar', labelEn: 'Calendar', labelAm: 'ካላንደር', icon: Calendar },
     { id: 'about', labelEn: 'Campus & Legacy', labelAm: 'ስለ ት/ቤቱ', icon: GraduationCap }
   ];
 
   const adminNavItems = [
-    { id: 'admin', labelEn: adminUser ? 'Admin Desk' : 'Admin Login', labelAm: adminUser ? 'አድሚን ዴስክ' : 'አድሚን መግቢያ', icon: adminUser ? ShieldCheck : Lock },
+    { id: 'admin', labelEn: adminUser ? 'Admin portal' : 'Admin Login', labelAm: adminUser ? 'አድሚን ዴስክ' : 'አድሚን መግቢያ', icon: adminUser ? ShieldCheck : Lock },
     { id: 'registrar', labelEn: 'Registrar (2017 E.C.)', labelAm: 'ምዝገባ (2017 ዓ.ም.)', icon: UserPlus },
     { id: 'grades', labelEn: 'Sections & Curriculum', labelAm: 'ክፍሎችና ሥርዓተ-ትምህርት', icon: Layers },
     { id: 'teacher', labelEn: 'Teacher Suite', labelAm: 'የመምህራን ዴስክ', icon: FileSpreadsheet }

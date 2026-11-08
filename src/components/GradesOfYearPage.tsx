@@ -308,7 +308,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               className="btn-animated px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5 text-amber-400" />
-              <span>{lang === 'am' ? '← ወደ አድሚን ዴስክ' : '← Back to Admin Desk'}</span>
+              <span>{lang === 'am' ? '← ወደ አድሚን ዴስክ' : '← Back to admin'}</span>
             </button>
           )}
           {onNavigateToRegistrar && (
@@ -317,7 +317,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               className="btn-animated px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-950" />
-              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : '2017 Registrar Desk →'}</span>
+              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : 'Registrar →'}</span>
             </button>
           )}
         </div>
@@ -368,7 +368,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               </div>
 
               <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                {lang === 'am' ? 'የዘንድሮ ክፍሎች፣ ሴክሽኖችና የተመደቡ መምህራን' : 'Grades of This Year — Sections & Curriculum'}
+                {lang === 'am' ? 'ክፍሎች፣ ሴክሽኖችና የተመደቡ መምህራን' : 'Classes & Sections: teachers and curriculum'}
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-3xl leading-relaxed">
                 {lang === 'am'

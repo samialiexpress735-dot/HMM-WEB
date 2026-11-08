@@ -129,7 +129,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
       <div className="space-y-4">
         <div>
           <h2 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight">
-            {lang === 'am' ? 'የትምህርት ቤቱ መግቢያ በሮች' : 'Institutional Portals & Gateways'}
+            {lang === 'am' ? 'የትምህርት ቤቱ መግቢያ በሮች' : 'Quick access'}
           </h2>
           <p className="text-xs md:text-sm text-slate-500">
             {lang === 'am'
@@ -212,7 +212,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               onClick={() => onNavigate('registrar')}
               className="mt-6 w-full flex items-center justify-between px-4 py-2.5 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer"
             >
-              <span>{lang === 'am' ? 'የሬጅስትራር ክፍል' : 'Launch Registrar Desk'}</span>
+              <span>{lang === 'am' ? 'የሬጅስትራር ክፍል' : 'Open registrar'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -224,7 +224,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <h3 className="text-lg md:text-xl font-bold text-slate-900">
-              {lang === 'am' ? 'የትምህርት ቤቱ ቅርስ እና መገልገያዎች' : 'Campus Spotlight & Academic Facilities'}
+              {lang === 'am' ? 'የትምህርት ቤቱ ቅርስ እና መገልገያዎች' : 'Campus and facilities'}
             </h3>
             <p className="text-xs text-slate-500">
               {lang === 'am'

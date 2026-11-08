@@ -437,7 +437,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               Debre Berhan, Ethiopia · Academic Year 2017 E.C.
             </div>
             <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
-              {lang === 'am' ? 'የመምህራን መግቢያ እና የክፍል መቆጣጠሪያ' : 'Faculty Sign In & Class Management Desk'}
+              {lang === 'am' ? 'የመምህራን መግቢያ እና የክፍል መቆጣጠሪያ' : 'Teacher sign in'}
             </h1>
             <p className="text-xs text-slate-300 mt-1 max-w-md mx-auto">
               {lang === 'am'
@@ -1447,7 +1447,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
             <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'marks' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
-              <span>{activeTab === 'marks' ? 'Active Workspace' : 'Open Gradebook →'}</span>
+              <span>{activeTab === 'marks' ? 'Current class' : 'Open Gradebook →'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </div>
           </button>
@@ -1479,7 +1479,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
             <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'attendance' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
-              <span>{activeTab === 'attendance' ? 'Active Workspace' : 'Open Attendance →'}</span>
+              <span>{activeTab === 'attendance' ? 'Current class' : 'Open Attendance →'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </div>
           </button>
@@ -1511,7 +1511,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
             <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'roster' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
-              <span>{activeTab === 'roster' ? 'Active Workspace' : 'Open Roster →'}</span>
+              <span>{activeTab === 'roster' ? 'Current class' : 'Open Roster →'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </div>
           </button>
@@ -1543,7 +1543,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
             <div className={`mt-3 pt-2 border-t text-[11px] font-bold flex items-center justify-between ${activeTab === 'notices' ? 'border-emerald-700/60 text-emerald-200' : 'border-slate-100 text-emerald-700'}`}>
-              <span>{activeTab === 'notices' ? 'Active Workspace' : 'Open Bulletins →'}</span>
+              <span>{activeTab === 'notices' ? 'Current class' : 'Open Bulletins →'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </div>
           </button>

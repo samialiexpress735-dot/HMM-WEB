@@ -135,7 +135,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       totalStudentsInSection: students.filter((s) => s.grade === newStudentGrade && s.section === newStudentSection.toUpperCase()).length + 1,
       attendanceRate: 98.0,
       conduct: 'A',
-      homeroomTeacher: 'Assigned in Grades of This Year',
+      homeroomTeacher: 'Not assigned yet',
       guardianName: newStudentGuardian.trim() || 'Parent / Guardian',
       guardianPhone: newStudentGuardianPhone.trim(),
       attendanceStatus: 'Present',
@@ -308,7 +308,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       department: teacherDepartment,
       subject: teacherSubject,
       gradesTeaching: [9, 10, 11, 12],
-      sectionsTeaching: ['To be assigned in Grades of This Year'],
+      sectionsTeaching: ['Not assigned yet'],
       email: teacherEmail.trim().toLowerCase(),
       phone: teacherPhone.trim(),
       qualification: 'B.Ed. / B.Sc. (Ethiopian University)',
@@ -446,7 +446,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         <div className="flex items-center gap-2">
           <div className="px-3.5 py-2 bg-white/10 text-white text-xs font-bold rounded-full flex items-center gap-1.5">
             <Shield className="w-3.5 h-3.5 text-amber-400" />
-            <span>{lang === 'am' ? 'የአስተዳዳሪ ዴስክ' : 'Admin Suite'}</span>
+            <span>{lang === 'am' ? 'የአስተዳዳሪ ዴስክ' : 'Admin'}</span>
           </div>
           {onNavigateToRegistrar && (
             <button
@@ -454,7 +454,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               className="btn-academic px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold rounded-full flex items-center gap-1.5 cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-950" />
-              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : '2017 Registrar Desk →'}</span>
+              <span>{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : 'Registrar →'}</span>
             </button>
           )}
           {onNavigateToGrades && (
@@ -463,7 +463,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-slate-100 text-xs font-bold rounded-full flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Layers className="w-3.5 h-3.5 text-emerald-300" />
-              <span>{lang === 'am' ? 'የዘንድሮ ክፍሎች →' : 'Grades of This Year →'}</span>
+              <span>{lang === 'am' ? 'ክፍሎችና ሴክሽኖች →' : 'Classes & Sections →'}</span>
             </button>
           )}
         </div>
@@ -511,7 +511,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight mt-1">
                   {lang === 'am'
                     ? 'የትምህርት ቤት ዋና አስተዳዳሪና የተጠቃሚዎች መቆጣጠሪያ'
-                    : 'School Director & User Provisioning Desk'}
+                    : 'School director and user accounts'}
                 </h2>
                 <p className="text-xs md:text-sm text-slate-500 mt-0.5">
                   Register faculty, create sub-administrators, post school notices, and issue student & parent access slips
@@ -584,108 +584,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
       {/* DEDICATED ADMIN SUB-NAVBAR (Clean, elevated, easy to manage) */}
       <nav className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-2 sm:p-2.5 sticky top-2 z-30 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          <button
-            onClick={() => setActiveAdminTab('overview')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'overview'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Shield className={`w-4 h-4 ${activeAdminTab === 'overview' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? 'የትምህርት ቤት አጠቃላይ እይታ' : 'Executive Overview'}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveAdminTab('staff')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'staff'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Users className={`w-4 h-4 ${activeAdminTab === 'staff' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? 'የመምህራንና ሰራተኞች ምዝገባ' : 'Staff Provisioning (Teachers & Sub-Admins)'}</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeAdminTab === 'staff' ? 'bg-emerald-700 text-white' : 'bg-slate-200 text-slate-800'
-              }`}
-            >
-              {teachers.length + subAdmins.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveAdminTab('students')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'students'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Search className={`w-4 h-4 ${activeAdminTab === 'students' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? 'የተማሪዎች መረጃ ፍለጋ' : 'Student Search & Dossiers'}</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeAdminTab === 'students' ? 'bg-emerald-700 text-white' : 'bg-slate-200 text-slate-800'
-              }`}
-            >
-              {students.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveAdminTab('credentials')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'credentials'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Key className={`w-4 h-4 ${activeAdminTab === 'credentials' ? 'text-amber-400' : 'text-amber-500'}`} />
-            <span>{lang === 'am' ? 'የተማሪና ወላጅ መግቢያ ካርድ' : 'Student & Parent Login Slips'}</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeAdminTab === 'credentials' ? 'bg-emerald-700 text-white' : 'bg-amber-100 text-amber-900'
-              }`}
-            >
-              {sectionStudents.length} Active
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveAdminTab('notices')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'notices'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <span className="p-1 rounded bg-amber-100 text-amber-800">
-              <BookOpen className="w-3.5 h-3.5" />
-            </span>
-            <span>{lang === 'am' ? 'ማስታወቂያና ካላንደር' : 'Announcements & Calendar'}</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeAdminTab === 'notices' ? 'bg-emerald-700 text-white' : 'bg-slate-200 text-slate-800'
-              }`}
-            >
-              {announcements.length + events.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveAdminTab('school')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeAdminTab === 'school'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Building2 className={`w-4 h-4 ${activeAdminTab === 'school' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? 'የትምህርት ቤት መረጃ' : 'School Profile & Accreditation'}</span>
-          </button>
+        <div role="tablist" aria-label="Admin sections" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {([
+            { id: 'overview', Icon: Shield, en: 'Overview', am: 'አጠቃላይ እይታ' },
+            { id: 'staff', Icon: Users, en: 'Staff', am: 'ሰራተኞች', count: teachers.length + subAdmins.length },
+            { id: 'students', Icon: Search, en: 'Students', am: 'ተማሪዎች', count: students.length },
+            { id: 'credentials', Icon: Key, en: 'Login slips', am: 'የመግቢያ ካርዶች', count: sectionStudents.length },
+            { id: 'notices', Icon: BookOpen, en: 'Announcements & events', am: 'ማስታወቂያና ዝግጅቶች', count: announcements.length + events.length },
+            { id: 'school', Icon: Building2, en: 'School profile', am: 'የትምህርት ቤት መረጃ' }
+          ] as { id: 'overview' | 'staff' | 'students' | 'credentials' | 'notices' | 'school'; Icon: React.ElementType; en: string; am: string; count?: number }[]).map(({ id, Icon, en, am, count }) => {
+            const active = activeAdminTab === id;
+            return (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveAdminTab(id)}
+                className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-[13px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                  active ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <Icon className={`h-4 w-4 ${active ? 'text-amber-300' : 'text-slate-400'}`} />
+                <span>{lang === 'am' ? am : en}</span>
+                {count !== undefined && (
+                  <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] tabular-nums ${active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {activeAdminTab === 'credentials' && (
@@ -721,7 +649,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <span>Academic Year: 2017 E.C. (2024/2025) · Term 1 In Session</span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                  {lang === 'am' ? 'የትምህርት ቤቱ አስተዳደር መቆጣጠሪያ ማዕከል' : 'Executive School Command Dashboard'}
+                  {lang === 'am' ? 'የትምህርት ቤቱ አስተዳደር መቆጣጠሪያ ማዕከል' : 'School overview'}
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
                   Welcome, <strong>{currentAdmin.fullName}</strong>. Manage institutional operations, curriculum sections, faculty appointments, and student report card credentials from one unified center.
@@ -1083,7 +1011,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     }`}
                   >
                     <Shield className="w-4 h-4 text-amber-600" />
-                    <span>{showAddSubAdminDrawer ? 'Close Sub-Admin Form' : '+ Add Sub-Admin'}</span>
+                    <span>{showAddSubAdminDrawer ? 'Close form' : '+ Add administrator'}</span>
                   </button>
                 </div>
               </div>
@@ -1209,7 +1137,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                     <div className="md:col-span-2 lg:col-span-3 flex items-center justify-between pt-2">
                       <p className="text-[11px] text-slate-500 italic">
-                        Tip: Classroom homeroom assignments can be set in &quot;Grades of This Year&quot; without re-typing.
+                        Tip: you can assign homeroom teachers later in Classes &amp; Sections.
                       </p>
                       <button
                         type="submit"

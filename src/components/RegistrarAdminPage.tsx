@@ -717,7 +717,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>{lang === 'am' ? '← ወደ አስተዳዳሪ ዴስክ' : '← Back to Admin Desk'}</span>
+              <span>{lang === 'am' ? '← ወደ አስተዳዳሪ ዴስክ' : '← Back to admin'}</span>
             </button>
           )}
           {onNavigateToGrades && (
@@ -726,7 +726,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               className="btn-animated px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <Layers className="w-3.5 h-3.5 text-amber-400" />
-              <span>{lang === 'am' ? 'የዘንድሮ ክፍሎች →' : 'Grades of This Year →'}</span>
+              <span>{lang === 'am' ? 'ክፍሎችና ሴክሽኖች →' : 'Classes & Sections →'}</span>
             </button>
           )}
         </div>
@@ -772,7 +772,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               {lang === 'am'
                 ? 'የ2017 ዓ.ም. አዲስ ዓመት ምዝገባ፣ የክፍል ድልድልና የመምህራን ክፍለ-ጊዜ ምደባ'
-                : '2017 E.C. Registrar Desk, Section Allocator & Timetable Manager'}
+                : 'Registrar: admissions, sections and timetables'}
             </h1>
             <p className="text-xs sm:text-sm text-emerald-100/90 max-w-3xl">
               {lang === 'am'
@@ -855,7 +855,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Layers className="w-4 h-4 text-amber-400" />
-            <span>{lang === 'am' ? 'የዘንድሮ ክፍሎችን ተመልከት →' : 'View Grades of This Year →'}</span>
+            <span>{lang === 'am' ? 'ክፍሎችና ሴክሽኖችን ተመልከት →' : 'View Classes & Sections →'}</span>
           </button>
         )}
       </div>
@@ -2084,8 +2084,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </span>
                 <p className="text-xs text-slate-600">
                   {lang === 'am'
-                    ? '1. በ"Grades of This Year" ገጽ ላይ የክፍል መምህራንን (Homeroom & Subject Teachers) ይመድቡ።'
-                    : '1. In "Grades of This Year", assign certified subject teachers & homeroom advisors.'}
+                    ? '1. በ"ክፍሎችና ሴክሽኖች" ገጽ ላይ የክፍል መምህራንንና የትምህርት ዓይነት መምህራንን ይመድቡ።'
+                    : '1. In "Classes & Sections", assign subject teachers and homeroom teachers.'}
                 </p>
                 <p className="text-xs text-slate-600">
                   {lang === 'am'
@@ -2106,7 +2106,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     className="w-full sm:w-auto flex-1 btn-animated px-4 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <BookOpen className="w-4 h-4 text-amber-300" />
-                    <span>{lang === 'am' ? 'ወደ ክፍሎች አስተዳደር ሂድ →' : 'View in Grades of This Year →'}</span>
+                    <span>{lang === 'am' ? 'ወደ ክፍሎች አስተዳደር ሂድ →' : 'View in Classes & Sections →'}</span>
                   </button>
                 )}
 
