@@ -9,6 +9,7 @@ export interface ArchiveStudent {
   fullName: string;
   fullNameAmharic: string;
   gender: 'M' | 'F';
+  dateOfBirth?: string; // ISO date (YYYY-MM-DD), used to confirm previous-year matches
   previousGrade: number; // e.g. 8 (feeder school), 9, 10, 11
   previousSection: string; // e.g. '8B', '9A', '10C'
   previousSchool: string; // e.g. 'Debre Berhan Primary School'
@@ -26,6 +27,8 @@ export interface RegisteredStudent2019 {
   fullName: string;
   fullNameAmharic: string;
   gender: 'M' | 'F';
+  dateOfBirth?: string; // ISO date (YYYY-MM-DD)
+  previousStudentId?: string; // Student ID of the confirmed previous-year record, if any
   targetGrade: number; // 9, 10, 11, 12
   stream?: 'Natural Science' | 'Social Science';
   cteSpecialization?: 'Web Design and Development' | 'Marketing' | 'Accounting' | 'Construction' | string;

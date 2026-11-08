@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   UserPlus,
-  Search,
   Users,
   Calendar,
   AlertTriangle,
@@ -40,7 +39,6 @@ import {
   RegisteredStudent2019,
   TimetableSlot,
   SectionAllocationBucket,
-  recommendPreviousYearStudents,
   allocateStudentsToSections,
   reassignStudentToSection,
   generateSectionRosterCsv,
@@ -48,12 +46,21 @@ import {
   DAYS_OF_WEEK,
   PERIOD_TIMES
 } from '../utils/registrationAndTimetable';
+import { PreviousStudentCheck } from './PreviousStudentCheck';
+import {
+  buildStudentMatchIndex,
+  composeFullName,
+  mergePreviousRecords,
+  splitFullName,
+  studentToPreviousRecord
+} from '../utils/studentMatching';
 import {
   PREVIOUS_YEAR_ARCHIVE_STUDENTS,
   INITIAL_REGISTERED_2019_STUDENTS,
   INITIAL_TIMETABLE_SLOTS
 } from '../data/registrationArchiveData';
 import {
+  Student,
   Teacher,
   GradeSection,
   STANDARD_GRADE_9_10_SUBJECTS,
@@ -68,6 +75,8 @@ interface RegistrarAdminPageProps {
   teachers: Teacher[];
   sections: GradeSection[];
   onAddSections: (newSections: GradeSection[]) => void;
+  /** Currently enrolled students. They become next year's "previous-year" records for matching. */
+  students?: Student[];
   onUpdateStudents?: (students: any[] | ((prev: any[]) => any[])) => void;
   lang: 'en' | 'am';
   onNavigateToGrades?: () => void;
@@ -81,6 +90,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   teachers,
   sections,
   onAddSections,
+  students: enrolledStudents = [],
   onUpdateStudents,
   lang,
   onNavigateToGrades,
@@ -135,8 +145,10 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [targetGrade, setTargetGrade] = useState<number>(9);
   const [targetStream, setTargetStream] = useState<'Natural Science' | 'Social Science'>('Natural Science');
   const [cteSpecialization, setCteSpecialization] = useState<CTESpecialization>('Web Design and Development');
-  const [searchArchiveQuery, setSearchArchiveQuery] = useState<string>('');
-  const [fullName, setFullName] = useState<string>('');
+  const [firstName, setFirstName] = useState<string>('');
+  const [fatherName, setFatherName] = useState<string>('');
+  const [grandfatherName, setGrandfatherName] = useState<string>('');
+  const [dateOfBirth, setDateOfBirth] = useState<string>('');
   const [fullNameAmharic, setFullNameAmharic] = useState<string>('');
   const [gender, setGender] = useState<'M' | 'F'>('M');
   const [previousSchool, setPreviousSchool] = useState<string>('Debre Berhan Primary School');
@@ -146,6 +158,18 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [guardianName, setGuardianName] = useState<string>('');
   const [guardianPhone, setGuardianPhone] = useState<string>('+251 91 ');
   const [conduct, setConduct] = useState<'A' | 'B' | 'C' | 'D'>('A');
+
+  // Previous Student Check state
+  const [previousStudentIdInput, setPreviousStudentIdInput] = useState<string>('');
+  const [linkedRecord, setLinkedRecord] = useState<ArchiveStudent | null>(null);
+  const [checkSession, setCheckSession] = useState<number>(0); // bump to reset the check panel
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(() => new Set());
+  const autoFillTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (autoFillTimer.current) clearTimeout(autoFillTimer.current);
+  }, []);
+
+  const fullName = composeFullName(firstName, fatherName, grandfatherName);
 
   // Allocation State
   const [allocationGrade, setAllocationGrade] = useState<number>(9);
@@ -179,29 +203,90 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [clashError, setClashError] = useState<string | null>(null);
   const [clashErrorAmharic, setClashErrorAmharic] = useState<string | null>(null);
 
-  // Recommendations for previous year students as the registrar starts typing
-  const matchingArchiveStudents = recommendPreviousYearStudents(
-    archiveStudents,
-    targetGrade,
-    searchArchiveQuery
+  // Previous-year records = the static archive + students enrolled this year.
+  // The index is rebuilt only when that list changes, so typing stays fast.
+  const previousRecords = useMemo(
+    () => mergePreviousRecords(archiveStudents, enrolledStudents.map(studentToPreviousRecord)),
+    [archiveStudents, enrolledStudents]
+  );
+  const matchIndex = useMemo(() => buildStudentMatchIndex(previousRecords), [previousRecords]);
+
+  // Previous students that already have a registration this year (prevents double registration).
+  const alreadyRegisteredPreviousIds = useMemo(
+    () => new Set(registeredStudents.map((s) => s.previousStudentId).filter((id): id is string => Boolean(id))),
+    [registeredStudents]
   );
 
-  // Auto-fill from candidate click
-  const handleSelectArchiveStudent = (cand: ArchiveStudent) => {
-    setFullName(cand.fullName);
-    setFullNameAmharic(cand.fullNameAmharic);
+  // What the administrator has entered so far, checked against previous-year records.
+  const matchQuery = useMemo(
+    () => ({
+      firstName,
+      fatherName,
+      grandfatherName,
+      fullNameAmharic,
+      dateOfBirth,
+      gender,
+      guardianName,
+      guardianPhone,
+      targetGrade
+    }),
+    [firstName, fatherName, grandfatherName, fullNameAmharic, dateOfBirth, gender, guardianName, guardianPhone, targetGrade]
+  );
+
+  const fillRing = (field: string) =>
+    autoFilledFields.has(field) ? ' ring-2 ring-emerald-400 border-emerald-400 bg-emerald-50' : '';
+
+  // Administrator confirmed a suggestion: fill the form from the previous record.
+  const handleUsePreviousStudent = (cand: ArchiveStudent) => {
+    const filled = new Set<string>();
+    const names = splitFullName(cand.fullName);
+    setFirstName(names.firstName);
+    setFatherName(names.fatherName);
+    setGrandfatherName(names.grandfatherName);
+    filled.add('name');
+    if (cand.fullNameAmharic) {
+      setFullNameAmharic(cand.fullNameAmharic);
+      filled.add('amharic');
+    }
+    if (cand.dateOfBirth) {
+      setDateOfBirth(cand.dateOfBirth);
+      filled.add('dob');
+    }
     setGender(cand.gender);
-    setPreviousSchool(cand.previousSchool);
+    filled.add('gender');
+    if (cand.previousSchool) {
+      setPreviousSchool(cand.previousSchool);
+      filled.add('school');
+    }
     setPreviousGrade(cand.previousGrade);
     setPreviousSection(cand.previousSection);
-    setPreviousScore(cand.previousAverageScore);
-    setGuardianName(cand.guardianName);
-    setGuardianPhone(cand.guardianPhone);
+    if (cand.previousAverageScore > 0) {
+      setPreviousScore(cand.previousAverageScore);
+      filled.add('score');
+    }
+    if (cand.guardianName) {
+      setGuardianName(cand.guardianName);
+      filled.add('guardianName');
+    }
+    if (cand.guardianPhone) {
+      setGuardianPhone(cand.guardianPhone);
+      filled.add('guardianPhone');
+    }
     setConduct(cand.conduct);
     if (cand.recommendedStream) {
       setTargetStream(cand.recommendedStream);
     }
-    setSearchArchiveQuery(cand.fullName);
+
+    setLinkedRecord(cand);
+    setPreviousStudentIdInput('');
+    setAutoFilledFields(filled);
+    if (autoFillTimer.current) clearTimeout(autoFillTimer.current);
+    autoFillTimer.current = setTimeout(() => setAutoFilledFields(new Set()), 4000);
+  };
+
+  const handleUnlinkPreviousStudent = () => {
+    setLinkedRecord(null);
+    setAutoFilledFields(new Set());
   };
 
   // Submit new registration
@@ -219,6 +304,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       fullName: fullName.trim(),
       fullNameAmharic: fullNameAmharic.trim() || fullName.trim(),
       gender,
+      dateOfBirth: dateOfBirth || undefined,
+      previousStudentId: linkedRecord?.studentId,
       targetGrade,
       stream: targetGrade >= 11 ? targetStream : undefined,
       cteSpecialization: targetGrade >= 11 ? cteSpecialization : undefined,
@@ -241,10 +328,17 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     syncStudentToCloud(newStudent).catch(() => {});
 
     // Reset fields
-    setFullName('');
+    setFirstName('');
+    setFatherName('');
+    setGrandfatherName('');
     setFullNameAmharic('');
-    setSearchArchiveQuery('');
+    setDateOfBirth('');
     setGuardianName('');
+    setGuardianPhone('+251 91 ');
+    setPreviousStudentIdInput('');
+    setLinkedRecord(null);
+    setAutoFilledFields(new Set());
+    setCheckSession((n) => n + 1);
     alert(
       lang === 'am'
         ? `ተማሪ ${newStudent.fullNameAmharic} ለ2017 ዓ.ም. በ${targetGrade}ኛ ክፍል ${
@@ -525,6 +619,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             fullName: st.fullName,
             fullNameAmharic: st.fullNameAmharic || st.fullName,
             gender: st.gender,
+            dateOfBirth: st.dateOfBirth,
             grade: allocationGrade,
             section: bucket.sectionLetter,
             stream: st.stream,
@@ -871,19 +966,19 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             <div>
               <strong className="font-extrabold text-sm block">
                 {lang === 'am'
-                  ? 'የ2018 ዓ.ም. የተማሪዎች ዳታቤዝ አውቶኮምፕሊት (Intelligent Autocomplete Enabled)'
-                  : 'Connected to 2018 E.C. Previous Year Feeder School Records'}
+                  ? 'ባለፈው ዓመት የተማሪዎች መዝገብ በራስ-ሰር ይፈተሻል'
+                  : 'Registration checks last year’s student records automatically'}
               </strong>
               <span>
                 {lang === 'am'
-                  ? 'ተማሪው የሚቀላቀለውን ክፍል ይምረጡ፤ ስሙን ወይም መታወቂያውን መጻፍ ሲጀምሩ ሲስተሙ ካለፈው ዓመት ተማሪዎች መረጃ ውስጥ ፈልጎ ወዲያውኑ ይመክራል! አንዱን ሲጫኑ መረጃው ሙሉ በሙሉ በፎርሙ ውስጥ ይሞላል።'
-                  : 'Select the grade the student will join in 2019 E.C. As you start typing their name or ID, the system searches previous year records (feeder Grade 8 graduates, 9th/10th grade promotees) and recommends matches with instant 1-click form auto-fill.'}
+                  ? 'የተማሪውን ስም፣ የአባት ስም እና የአያት ስም ሲጽፉ ሲስተሙ ተመሳሳይ የቀድሞ ተማሪ ካለ ይጠቁማል። እርስዎ እስኪያረጋግጡ ድረስ ምንም መረጃ ወደ ፎርሙ አይገባም።'
+                  : 'As you enter the student’s name, the system looks for a matching student from last year and suggests it. Nothing is copied into the form until you confirm.'}
               </span>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Form: Step 1 Grade + Autocomplete Search + Registration Form */}
+            {/* Left Form: Step 1 Grade + Registration Form with Previous Student Check */}
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
@@ -908,7 +1003,6 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       onClick={() => {
                         setTargetGrade(g);
                         setPreviousGrade(g - 1);
-                        setSearchArchiveQuery('');
                       }}
                       className={`py-2 px-3 rounded-xl font-black text-xs transition-all cursor-pointer border ${
                         targetGrade === g
@@ -1034,131 +1128,113 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
               )}
 
-              {/* SEARCH & AUTOCOMPLETE RECOMMENDATION BOX */}
-              <div className="bg-amber-50/70 border-2 border-dashed border-amber-300 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-amber-950 flex items-center gap-1.5">
-                    <Search className="w-4 h-4 text-amber-700" />
-                    <span>
-                      {lang === 'am'
-                        ? 'ያለፈው ዓመት (2018 ዓ.ም.) ተማሪዎችን ፈልግና ምረጥ (Autocomplete):'
-                        : 'Search & Recommend from Last Year (2018 E.C.) Records:'}
-                    </span>
-                  </span>
-                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                    {matchingArchiveStudents.length} Matches Found
-                  </span>
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={searchArchiveQuery}
-                    onChange={(e) => setSearchArchiveQuery(e.target.value)}
-                    placeholder={
-                      lang === 'am'
-                        ? 'የተማሪውን ስም መጻፍ ይጀምሩ (ለምሳሌ: Yared, Bethlehem, ዳዊት, ሳምራዊት) ወይም መታወቂያ...'
-                        : 'Start typing student name in English or Amharic (e.g. Yared, Bethlehem, ዳዊት) or ID...'
-                    }
-                    className="w-full bg-white border border-amber-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                  />
-                  {searchArchiveQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchArchiveQuery('')}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Recommendations List */}
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {matchingArchiveStudents.length > 0 ? (
-                    matchingArchiveStudents.map((cand) => (
-                      <div
-                        key={cand.id}
-                        className="bg-white p-3 rounded-xl border border-amber-200/90 hover:border-emerald-500 hover:shadow-sm transition-all flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs flex-shrink-0">
-                            {cand.gender === 'F' ? '♀' : '♂'}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-extrabold text-slate-900 truncate">
-                              {cand.fullName} ({cand.fullNameAmharic})
-                            </div>
-                            <div className="text-[10px] text-slate-500 truncate flex items-center gap-1.5">
-                              <span className="font-semibold text-emerald-700">{cand.previousSchool}</span>
-                              <span>•</span>
-                              <span>Prev Gr: {cand.previousGrade} ({cand.previousSection})</span>
-                              <span>•</span>
-                              <span className="font-bold text-amber-700">Avg: {cand.previousAverageScore}%</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleSelectArchiveStudent(cand)}
-                          className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] font-bold rounded-lg shadow-2xs flex-shrink-0 transition-colors cursor-pointer flex items-center gap-1"
-                        >
-                          <Check className="w-3.5 h-3.5 text-amber-400" />
-                          <span>{lang === 'am' ? 'ምረጥ' : 'Auto-Fill'}</span>
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-3 text-xs text-slate-500">
-                      No matching 2018 E.C. records found. You can enter transfer details manually below.
-                    </div>
-                  )}
-                </div>
-              </div>
-
               {/* REGISTRATION FORM FIELDS */}
               <form onSubmit={handleRegisterStudent} className="space-y-4 pt-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Student identity: the Previous Student Check reads these fields */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Full Name (English) *
+                    <label htmlFor="reg-first-name" className="block text-xs font-bold text-slate-700 mb-1">
+                      {lang === 'am' ? 'የተማሪው ስም *' : 'First Name *'}
                     </label>
                     <input
+                      id="reg-first-name"
                       type="text"
                       required
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      placeholder="e.g. Yared Getachew Tadesse"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="e.g. Yared"
+                      autoComplete="off"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label htmlFor="reg-father-name" className="block text-xs font-bold text-slate-700 mb-1">
+                      {lang === 'am' ? 'የአባት ስም' : 'Father’s Name'}
+                    </label>
+                    <input
+                      id="reg-father-name"
+                      type="text"
+                      value={fatherName}
+                      onChange={(e) => setFatherName(e.target.value)}
+                      placeholder="e.g. Getachew"
+                      autoComplete="off"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="reg-grandfather-name" className="block text-xs font-bold text-slate-700 mb-1">
+                      {lang === 'am' ? 'የአያት ስም' : 'Grandfather’s Name'}
+                    </label>
+                    <input
+                      id="reg-grandfather-name"
+                      type="text"
+                      value={grandfatherName}
+                      onChange={(e) => setGrandfatherName(e.target.value)}
+                      placeholder="e.g. Tadesse"
+                      autoComplete="off"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="sm:col-span-2">
+                    <label htmlFor="reg-name-am" className="block text-xs font-bold text-slate-700 mb-1">
                       ሙሉ ስም (በአማርኛ)
                     </label>
                     <input
+                      id="reg-name-am"
                       type="text"
                       value={fullNameAmharic}
                       onChange={(e) => setFullNameAmharic(e.target.value)}
                       placeholder="ለምሳሌ፡ ያሬድ ጌታቸው ታደሰ"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                      autoComplete="off"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-medium${fillRing('amharic')}`}
                     />
                   </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Gender</label>
+                    <label htmlFor="reg-dob" className="block text-xs font-bold text-slate-700 mb-1">
+                      {lang === 'am' ? 'የትውልድ ቀን' : 'Date of Birth'}
+                    </label>
+                    <input
+                      id="reg-dob"
+                      type="date"
+                      value={dateOfBirth}
+                      min="1990-01-01"
+                      max={new Date().toISOString().split('T')[0]}
+                      onChange={(e) => setDateOfBirth(e.target.value)}
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('dob')}`}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="reg-gender" className="block text-xs font-bold text-slate-700 mb-1">Gender</label>
                     <select
+                      id="reg-gender"
                       value={gender}
                       onChange={(e) => setGender(e.target.value as 'M' | 'F')}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer font-semibold"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 cursor-pointer font-semibold${fillRing('gender')}`}
                     >
                       <option value="M">Male (ወንድ)</option>
                       <option value="F">Female (ሴት)</option>
                     </select>
                   </div>
+                </div>
+
+                {/* PREVIOUS STUDENT CHECK: runs in the background while the fields above are filled in */}
+                <PreviousStudentCheck
+                  key={checkSession}
+                  lang={lang}
+                  index={matchIndex}
+                  query={matchQuery}
+                  previousStudentIdInput={previousStudentIdInput}
+                  onPreviousStudentIdChange={setPreviousStudentIdInput}
+                  alreadyRegisteredIds={alreadyRegisteredPreviousIds}
+                  linkedRecord={linkedRecord}
+                  onUse={handleUsePreviousStudent}
+                  onUnlink={handleUnlinkPreviousStudent}
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Previous School</label>
                     <input
@@ -1166,7 +1242,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       value={previousSchool}
                       onChange={(e) => setPreviousSchool(e.target.value)}
                       placeholder="e.g. Debre Berhan Primary"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500${fillRing('school')}`}
                     />
                   </div>
                   <div>
@@ -1180,7 +1256,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       max="100"
                       value={previousScore}
                       onChange={(e) => setPreviousScore(Number(e.target.value))}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-bold${fillRing('score')}`}
                     />
                   </div>
                 </div>
@@ -1193,7 +1269,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       value={guardianName}
                       onChange={(e) => setGuardianName(e.target.value)}
                       placeholder="e.g. Ato Getachew Tadesse"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500${fillRing('guardianName')}`}
                     />
                   </div>
                   <div>
@@ -1203,7 +1279,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       value={guardianPhone}
                       onChange={(e) => setGuardianPhone(e.target.value)}
                       placeholder="+251 91 100 2233"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono transition-colors duration-500${fillRing('guardianPhone')}`}
                     />
                   </div>
                 </div>
@@ -1254,7 +1330,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <UserPlus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">No Grade {targetGrade} Students Enrolled Yet</p>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Use the intake form on the left or select a 2018 E.C. candidate above to enroll the first applicant.
+                      Use the intake form on the left to enroll the first applicant.
                     </p>
                   </div>
                 ) : (

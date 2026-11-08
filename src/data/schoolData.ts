@@ -9,6 +9,7 @@ export interface Student {
   fullName: string;
   fullNameAmharic: string;
   gender: 'M' | 'F';
+  dateOfBirth?: string; // ISO date (YYYY-MM-DD)
   grade: number; // 9, 10, 11, 12
   section: string; // 'A', 'B', 'C', 'D'
   stream?: 'Natural Science' | 'Social Science';

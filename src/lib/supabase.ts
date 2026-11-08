@@ -81,6 +81,17 @@ export const getSupabaseStatus = () => {
   };
 };
 
+/** True when Postgres/PostgREST reports a column that has not been created yet. */
+function isMissingColumnError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  return (
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    Boolean(error.message?.includes('does not exist')) ||
+    Boolean(error.message?.includes('schema cache'))
+  );
+}
+
 // ==============================================================================
 // 1. TEACHERS CRUD & SYNC
 // ==============================================================================
@@ -566,6 +577,8 @@ export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent20
       fullName: r.full_name,
       fullNameAmharic: r.full_name_amharic,
       gender: r.gender,
+      dateOfBirth: r.date_of_birth || undefined,
+      previousStudentId: r.previous_student_id || undefined,
       targetGrade: r.target_grade,
       stream: r.stream,
       academicYear: r.academic_year || '2019 E.C.',
@@ -588,7 +601,7 @@ export async function syncStudentToCloud(student: RegisteredStudent2019): Promis
   const client = getSupabaseClient();
   if (!client) return false;
   try {
-    const { error } = await client.from('registrations_2019').upsert({
+    const row: Record<string, any> = {
       id: student.id,
       student_id: student.studentId,
       full_name: student.fullName,
@@ -607,7 +620,18 @@ export async function syncStudentToCloud(student: RegisteredStudent2019): Promis
       registration_date: student.registrationDate,
       avatar: '',
       updated_at: new Date().toISOString()
-    });
+    };
+
+    // Optional columns (see supabase/add_date_of_birth.sql). Only sent when set,
+    // and retried without them if the database has not been migrated yet.
+    const optional: Record<string, any> = {};
+    if (student.dateOfBirth) optional.date_of_birth = student.dateOfBirth;
+    if (student.previousStudentId) optional.previous_student_id = student.previousStudentId;
+
+    let { error } = await client.from('registrations_2019').upsert({ ...row, ...optional });
+    if (error && Object.keys(optional).length > 0 && isMissingColumnError(error)) {
+      ({ error } = await client.from('registrations_2019').upsert(row));
+    }
     return !error;
   } catch {
     return false;
@@ -678,6 +702,7 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         fullName: s.full_name,
         fullNameAmharic: s.full_name_amharic || s.full_name,
         gender: s.gender || 'M',
+        dateOfBirth: s.date_of_birth || undefined,
         grade: Number(s.grade),
         section: s.section,
         stream: s.stream,
@@ -713,7 +738,7 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
   if (!client) return false;
   try {
     // 1. Upsert student basic profile
-    const { error: sErr } = await client.from('students').upsert({
+    const studentRow: Record<string, any> = {
       id: student.id,
       student_id: student.studentId,
       full_name: student.fullName,
@@ -731,7 +756,16 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
       guardian_phone: student.guardianPhone,
       avatar: student.avatar || '',
       created_at: new Date().toISOString()
-    });
+    };
+
+    // date_of_birth is optional (see supabase/add_date_of_birth.sql): only sent
+    // when known, and retried without it if the column has not been added yet.
+    let { error: sErr } = await client
+      .from('students')
+      .upsert(student.dateOfBirth ? { ...studentRow, date_of_birth: student.dateOfBirth } : studentRow);
+    if (sErr && student.dateOfBirth && isMissingColumnError(sErr)) {
+      ({ error: sErr } = await client.from('students').upsert(studentRow));
+    }
 
     if (sErr) {
       console.warn('Student upsert error:', sErr);
