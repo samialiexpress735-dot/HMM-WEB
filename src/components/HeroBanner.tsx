@@ -234,10 +234,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           </div>
 
           {/* Interactive Filter Tabs (Segmented Control) */}
-          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg shrink-0">
+          <div className="grid grid-cols-2 sm:flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-full sm:w-auto sm:shrink-0">
             <button
               onClick={() => setActiveSpotlightTab('heritage')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-2.5 sm:py-1.5 text-xs font-semibold text-center rounded-md transition-colors cursor-pointer sm:whitespace-nowrap ${
                 activeSpotlightTab === 'heritage'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -247,7 +247,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             </button>
             <button
               onClick={() => setActiveSpotlightTab('labs')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-2.5 sm:py-1.5 text-xs font-semibold text-center rounded-md transition-colors cursor-pointer sm:whitespace-nowrap ${
                 activeSpotlightTab === 'labs'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -257,7 +257,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             </button>
             <button
               onClick={() => setActiveSpotlightTab('library')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-2.5 sm:py-1.5 text-xs font-semibold text-center rounded-md transition-colors cursor-pointer sm:whitespace-nowrap ${
                 activeSpotlightTab === 'library'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -267,7 +267,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             </button>
             <button
               onClick={() => setActiveSpotlightTab('notices')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-2.5 sm:py-1.5 text-xs font-semibold text-center rounded-md transition-colors cursor-pointer sm:whitespace-nowrap ${
                 activeSpotlightTab === 'notices'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'

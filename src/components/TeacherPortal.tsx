@@ -1238,12 +1238,12 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
 
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* Quick Section Switcher */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1">
+            <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1 min-w-0 max-w-full">
               <span className="font-semibold hidden sm:inline">Section:</span>
               <select
                 value={selectedSection}
                 onChange={(e) => setSelectedSection(e.target.value)}
-                className="bg-transparent font-bold text-white [&>option]:text-white text-xs outline-none cursor-pointer"
+                className="min-w-0 truncate bg-transparent font-bold text-white [&>option]:text-white text-xs outline-none cursor-pointer"
               >
                 {visibleSections.map((s) => (
                   <option key={s} value={s}>
@@ -1303,13 +1303,13 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {/* Subject Selector */}
             {availableSubjects.length > 1 && (
-              <div className="flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-xl px-3 py-1.5 text-xs">
-                <BookOpen className="w-3.5 h-3.5 text-emerald-300" />
-                <span className="font-semibold text-slate-300">Subject:</span>
+              <div className="flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-xl px-3 py-1.5 text-xs min-w-0 max-w-full">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span className="font-semibold text-slate-300 shrink-0">Subject:</span>
                 <select
                   value={selectedSubjectId}
                   onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="bg-transparent font-bold text-white [&>option]:text-white outline-none cursor-pointer"
+                  className="min-w-0 truncate bg-transparent font-bold text-white [&>option]:text-white outline-none cursor-pointer"
                 >
                   {availableSubjects.map((sub) => (
                     <option key={sub.subjectId} value={sub.subjectId}>
@@ -1601,10 +1601,10 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               <table className="w-full text-left text-xs border-separate border-spacing-0">
                 <thead>
                   <tr className="text-slate-600">
-                    <th className="sticky top-0 left-0 z-30 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center w-12 min-w-12">#</th>
-                    <th className="sticky top-0 left-12 z-30 bg-slate-100 border-b border-slate-200 py-3 px-4 min-w-[220px] font-semibold">Student</th>
+                    <th className="sticky top-0 left-0 z-30 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center w-12 min-w-12 hidden sm:table-cell">#</th>
+                    <th className="sticky top-0 left-0 sm:left-12 z-30 bg-slate-100 border-b border-slate-200 py-3 px-2.5 sm:px-4 min-w-[132px] sm:min-w-[220px] font-semibold">Student</th>
                     {assessmentColumns.map((col) => (
-                      <th key={col.id} className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-2.5 px-2 text-center min-w-[112px]">
+                      <th key={col.id} className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-2.5 px-1.5 sm:px-2 text-center min-w-[88px] sm:min-w-[112px]">
                         <div className="flex items-center justify-center gap-1">
                           <span className="font-bold text-slate-900 truncate max-w-[90px]">{col.name}</span>
                           <button type="button" onClick={() => handleOpenEditColumnModal(col)} className="p-1 text-slate-400 hover:text-emerald-700 rounded cursor-pointer" title={`Edit ${col.name}`} aria-label={`Edit ${col.name}`}>
@@ -1621,7 +1621,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                         </span>
                       </th>
                     ))}
-                    <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center min-w-[104px] font-semibold">Total</th>
+                    <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-3 px-2 sm:px-3 text-center min-w-[84px] sm:min-w-[104px] font-semibold">Total</th>
                     <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center w-20 font-semibold">Grade</th>
                   </tr>
                 </thead>
@@ -1639,8 +1639,8 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                       const failing = summary.totalEarned > 0 && summary.percentage < 50;
                       return (
                         <tr key={student.id} className="group">
-                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                          <td className="sticky left-12 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-4">
+                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-3 text-center text-slate-400 font-mono hidden sm:table-cell">{idx + 1}</td>
+                          <td className="sticky left-0 sm:left-12 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-2.5 sm:px-4">
                             <div className="flex items-center gap-2 flex-wrap">
                               {failing && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="Below 50%" />}
                               <span className="font-semibold text-slate-900">{student.fullName}</span>
@@ -1649,12 +1649,12 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                               )}
                             </div>
                             <div className="text-[11px] text-slate-500 font-mono">
-                              {student.studentId}{student.fullNameAmharic && <span className="text-slate-400 font-sans"> · {student.fullNameAmharic}</span>}
+                              {student.studentId}{student.fullNameAmharic && <span className="hidden sm:inline text-slate-400 font-sans"> · {student.fullNameAmharic}</span>}
                             </div>
                           </td>
 
                           {assessmentColumns.map((col, cIdx) => (
-                            <td key={col.id} className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-2 text-center">
+                            <td key={col.id} className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-1.5 sm:px-2 text-center">
                               <ScoreCell
                                 value={getStudentColumnScore(student, col.id)}
                                 max={col.maxScore}

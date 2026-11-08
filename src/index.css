@@ -106,3 +106,11 @@
   body { background: white !important; color: black !important; }
   .print\:hidden { display: none !important; }
 }
+
+/* Mobile: iOS Safari zooms the page when a focused field is under 16px. Keep fields at 16px on phones. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  select,
+  textarea { font-size: 16px; }
+  body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}

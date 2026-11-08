@@ -872,32 +872,32 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   return (
     <div className="space-y-6 animate-fade-in w-full max-w-full">
       {/* Top bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 p-3 text-white">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-slate-950 p-2.5 sm:p-3 text-white">
+        <div className="flex items-center gap-2 min-w-0 flex-1 sm:flex-none">
           {onNavigateToAdmin && (
-            <button onClick={onNavigateToAdmin} className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {T('Back to admin', 'ወደ አስተዳዳሪ ተመለስ')}
+            <button onClick={onNavigateToAdmin} className="flex min-w-0 flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2.5 sm:py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
+              <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{T('Back to admin', 'ወደ አስተዳዳሪ ተመለስ')}</span>
             </button>
           )}
           {onNavigateToGrades && (
-            <button onClick={onNavigateToGrades} className="btn-academic flex items-center gap-1.5 rounded-full bg-amber-400 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 cursor-pointer">
-              <Layers className="h-3.5 w-3.5" />
-              {T('Classes & Sections', 'ክፍሎችና ሴክሽኖች')} →
+            <button onClick={onNavigateToGrades} className="btn-academic flex min-w-0 flex-1 sm:flex-none items-center justify-center gap-1.5 rounded-full bg-amber-400 px-3.5 py-2.5 sm:py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 cursor-pointer">
+              <Layers className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{T('Classes & Sections', 'ክፍሎችና ሴክሽኖች')} →</span>
             </button>
           )}
         </div>
         <div className="flex items-center gap-2">
           {onNavigateHome && (
-            <button onClick={onNavigateHome} title="View public website" className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
+            <button onClick={onNavigateHome} title="View public website" aria-label="View public website" className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 sm:px-3.5 py-2.5 sm:py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
               <Globe className="h-3.5 w-3.5 text-amber-300" />
-              {T('Public site', 'ድረ-ገጽ')}
+              <span className="hidden sm:inline">{T('Public site', 'ድረ-ገጽ')}</span>
             </button>
           )}
           {onSignOutAdmin && (
-            <button onClick={onSignOutAdmin} title="Sign out" className="flex items-center gap-1.5 rounded-full border border-rose-400/20 bg-rose-500/15 px-3.5 py-2 text-xs font-bold text-rose-300 transition-colors hover:bg-rose-500/25 cursor-pointer">
+            <button onClick={onSignOutAdmin} title="Sign out" aria-label="Sign out" className="flex items-center gap-1.5 rounded-full border border-rose-400/20 bg-rose-500/15 px-3 sm:px-3.5 py-2.5 sm:py-2 text-xs font-bold text-rose-300 transition-colors hover:bg-rose-500/25 cursor-pointer">
               <LogOut className="h-3.5 w-3.5" />
-              {T('Sign out', 'ውጣ')}
+              <span className="hidden sm:inline">{T('Sign out', 'ውጣ')}</span>
             </button>
           )}
         </div>
@@ -936,7 +936,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       </section>
 
       {/* Steps */}
-      <nav aria-label="Registrar steps" className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav aria-label="Registrar steps" className="grid grid-cols-3 gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 sm:flex sm:gap-2 sm:overflow-x-auto sm:p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {([
           ['registration', 1, T('Register students', 'ተማሪ መመዝገብ'), registeredStudents.length, UserPlus],
           ['allocation', 2, T('Place in classes', 'ክፍል መመደብ'), registeredStudents.length - registeredStudents.filter((r) => r.allocatedSection).length, Shuffle],
@@ -946,11 +946,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
           return (
             <button
               key={id} onClick={() => setActiveTab(id)} aria-current={active ? 'step' : undefined}
-              className={`flex shrink-0 items-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${active ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2.5 text-center text-[12px] leading-tight font-semibold transition-colors cursor-pointer sm:shrink-0 sm:flex-row sm:justify-start sm:gap-2.5 sm:px-4 sm:text-sm sm:leading-normal ${active ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
             >
               <span className={`flex h-5 w-5 items-center justify-center rounded-full font-mono text-[11px] ${active ? 'bg-amber-400 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
-              <Icon className={`h-4 w-4 ${active ? 'text-amber-300' : 'text-slate-400'}`} />
-              <span className="whitespace-nowrap">{label}</span>
+              <Icon className={`hidden h-4 w-4 sm:block ${active ? 'text-amber-300' : 'text-slate-400'}`} />
+              <span className="sm:whitespace-nowrap">{label}</span>
               {count !== undefined && (
                 <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] tabular-nums ${active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>{count}</span>
               )}
@@ -965,7 +965,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       {activeTab === 'registration' && (
         <div className="space-y-6">
           {toast && (
-            <div role="status" className="fade-up fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white shadow-2xl">
+            <div role="status" className="fade-up fixed bottom-4 sm:bottom-6 left-1/2 z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-slate-950 px-4 sm:px-5 py-3 text-sm font-medium text-white shadow-2xl">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
               {toast}
             </div>
@@ -1090,12 +1090,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 text-[11px] text-white">2</span>
                     {T('Grade to join', 'የሚገባበት ክፍል')}
                   </h4>
-                  <div className="inline-flex w-full gap-1 rounded-2xl bg-slate-100 p-1 sm:w-auto" role="radiogroup" aria-label="Grade">
+                  <div className="grid w-full grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1 sm:inline-flex sm:w-auto" role="radiogroup" aria-label="Grade">
                     {[9, 10, 11, 12].map((g) => (
                       <button
                         key={g} type="button" role="radio" aria-checked={targetGrade === g}
                         onClick={() => { setTargetGrade(g); setPreviousGrade(g - 1); }}
-                        className={`flex-1 rounded-xl px-5 py-2 text-sm font-bold transition-all cursor-pointer sm:flex-none ${targetGrade === g ? 'bg-slate-950 text-white shadow' : 'text-slate-600 hover:text-slate-900'}`}
+                        className={`rounded-xl px-5 py-2.5 sm:py-2 text-sm font-bold transition-all cursor-pointer sm:flex-none ${targetGrade === g ? 'bg-slate-950 text-white shadow' : 'text-slate-600 hover:text-slate-900'}`}
                       >
                         {T('Grade', 'ክፍል')} {g}
                       </button>

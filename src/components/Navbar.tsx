@@ -84,14 +84,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center justify-between h-14 px-3 sm:px-4 gap-3">
           <button
             onClick={() => handleNavClick(portalMode === 'admin' ? 'admin' : 'home')}
-            className="flex items-center gap-3 shrink-0 cursor-pointer text-left"
+            className="flex items-center gap-2.5 sm:gap-3 min-w-0 cursor-pointer text-left"
             aria-label="Hailemariam Mamo home"
           >
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-800 grid place-items-center font-display font-extrabold text-[11px] text-amber-200 ring-1 ring-white/15">
+            <span className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-800 grid place-items-center font-display font-extrabold text-[11px] text-amber-200 ring-1 ring-white/15">
               HMM
             </span>
-            <span className="leading-tight">
-              <span className="block font-display text-[13px] font-semibold text-white whitespace-nowrap">
+            <span className="block min-w-0 leading-tight">
+              <span className="block truncate font-display text-[13px] font-semibold text-white whitespace-nowrap max-[360px]:text-[12px]">
                 {isAm ? 'ኃይለማሪያም ማሞ ት/ቤት' : 'Hailemariam Mamo School'}
               </span>
               <span className="hidden sm:block text-[11px] text-slate-400 whitespace-nowrap">
@@ -113,10 +113,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <button
               onClick={() => setLang(lang === 'en' ? 'am' : 'en')}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-200 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-full text-xs font-semibold text-slate-200 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
               aria-label={lang === 'en' ? 'Switch to Amharic' : 'Switch to English'}
             >
               <Globe className="w-3.5 h-3.5 text-amber-300" />
@@ -151,7 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-full text-slate-200 hover:bg-white/10"
+              className="md:hidden p-2.5 -mr-1 rounded-full text-slate-200 hover:bg-white/10"
               aria-label="Toggle navigation menu" aria-expanded={mobileMenuOpen}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -160,7 +160,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {mobileMenuOpen && (
-          <div className="md:hidden px-3 pb-3 pt-1 border-t border-white/10 space-y-1">
+          <div className="md:hidden px-3 pb-3 pt-2 border-t border-white/10 space-y-1 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain">
             {currentNavItems.map((item) => {
               const Icon = item.icon;
               const active = currentTab === item.id;
@@ -171,6 +171,40 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               );
             })}
+            {(adminUser || teacherUser) && (
+              <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
+                {adminUser && (
+                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-white/5 text-xs">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0" />
+                      <span className="font-semibold truncate">{adminUser.fullName}</span>
+                    </span>
+                    <button
+                      onClick={() => { onSignOut(); setMobileMenuOpen(false); }}
+                      className="flex items-center gap-1.5 font-semibold text-slate-300 hover:text-white shrink-0 py-1"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />{isAm ? 'ውጣ' : 'Sign out'}
+                    </button>
+                  </div>
+                )}
+                {teacherUser && (
+                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-white/5 text-xs">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <FileSpreadsheet className="w-4 h-4 text-amber-300 shrink-0" />
+                      <span className="font-semibold truncate">{teacherUser.name}</span>
+                    </span>
+                    {onSignOutTeacher && (
+                      <button
+                        onClick={() => { onSignOutTeacher(); setMobileMenuOpen(false); }}
+                        className="flex items-center gap-1.5 font-semibold text-slate-300 hover:text-white shrink-0 py-1"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />{isAm ? 'ውጣ' : 'Sign out'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {onTogglePortalMode && (
               <button
                 onClick={() => { onTogglePortalMode(); setMobileMenuOpen(false); }}
