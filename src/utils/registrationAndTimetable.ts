@@ -146,9 +146,16 @@ export function allocateStudentsToSections(
     numSections?: number;
     mode: 'combined-smart' | 'gender-balanced' | 'merit-balanced' | 'random';
     targetCapacity?: number;
+    /**
+     * Letter to start from (0 = A, 1 = B ...). Use it when classes already exist for this grade,
+     * so new classes continue after them (existing 9A, 9B -> new ones are 9C, 9D).
+     */
+    startLetterIndex?: number;
   }
 ): SectionAllocationBucket[] {
   if (students.length === 0) return [];
+  const startIndex = Math.max(0, options.startLetterIndex || 0);
+  if (startIndex >= 26) return [];
 
   // Determine number of sections
   let sectionCount = 2;
@@ -159,7 +166,8 @@ export function allocateStudentsToSections(
   }
 
   // Cap section letters (A to Z)
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').slice(0, sectionCount);
+  sectionCount = Math.min(sectionCount, 26 - startIndex);
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').slice(startIndex, startIndex + sectionCount);
 
   // Initialize buckets
   const buckets: SectionAllocationBucket[] = letters.map((letter, idx) => {
@@ -172,7 +180,7 @@ export function allocateStudentsToSections(
     return {
       sectionLetter: letter,
       sectionCode,
-      roomNumber: `Block ${String.fromCharCode(65 + Math.floor(idx / 4))} - Room ${101 + idx}`,
+      roomNumber: `Block ${String.fromCharCode(65 + Math.floor((idx + startIndex) / 4))} - Room ${101 + idx + startIndex}`,
       maxCapacity: options.targetCapacity || options.studentsPerSection || 45,
       students: [],
       maleCount: 0,

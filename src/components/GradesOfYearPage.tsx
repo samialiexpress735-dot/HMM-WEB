@@ -34,6 +34,7 @@ import {
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
 import { getStudentsForSection as getStudentsForSectionUtil } from '../utils/sectionUtils';
+import { getSectionCapacity } from '../utils/sectionCapacity';
 
 interface GradesOfYearPageProps {
   sections: GradeSection[];
@@ -585,6 +586,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       <div className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                         <Users className="w-4 h-4 text-emerald-700" />
                         <span>{sec.totalStudents}</span>
+                        {!sec.isCteSection && (
+                          <span className="text-xs font-semibold text-slate-400">
+                            / {getSectionCapacity(sec)} {lang === 'am' ? 'መቀመጫ' : 'seats'}
+                          </span>
+                        )}
                         <span className="text-xs font-semibold text-slate-500">
                           (M: {sec.maleStudents} • F: {sec.femaleStudents})
                         </span>

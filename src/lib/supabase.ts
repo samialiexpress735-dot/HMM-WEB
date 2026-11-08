@@ -500,6 +500,7 @@ export async function fetchSectionsFromCloud(): Promise<GradeSection[]> {
       totalStudents: s.total_students || 0,
       maleStudents: s.male_students || 0,
       femaleStudents: s.female_students || 0,
+      capacity: typeof s.capacity === 'number' && s.capacity > 0 ? s.capacity : undefined,
       homeroomTeacher: {
         id: `t-hr-${s.id}`,
         name: s.homeroom_teacher_name || 'Unassigned',
@@ -551,8 +552,16 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
       is_cte_section: Boolean(section.isCteSection),
       cte_specialization: section.cteSpecialization || null
     };
-    const { error } = await client.from('grade_sections').upsert({ ...base, ...cte });
+    const cap = { capacity: section.capacity ?? null };
+    let { error } = await client.from('grade_sections').upsert({ ...base, ...cte, ...cap });
     if (!error) return true;
+
+    // The seats column does not exist until supabase/add_section_capacity.sql has been run.
+    if (/capacity/i.test(error.message || '')) {
+      console.warn('Seat capacity column missing: run supabase/add_section_capacity.sql. Saved without the seat count.');
+      ({ error } = await client.from('grade_sections').upsert({ ...base, ...cte }));
+      if (!error) return true;
+    }
 
     // The CTE columns do not exist until supabase/add_cte_sections.sql has been run. Save everything else anyway.
     if (/is_cte_section|cte_specialization|column/i.test(error.message || '')) {

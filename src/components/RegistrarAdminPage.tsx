@@ -33,7 +33,9 @@ import {
   Download,
   ArrowLeft,
   Globe,
-  LogOut
+  LogOut,
+  Plus,
+  Armchair
 } from 'lucide-react';
 import {
   ArchiveStudent,
@@ -73,11 +75,24 @@ import {
 } from '../utils/registrarLogic';
 import { Student } from '../data/schoolData';
 import { SCHOOL_INFO } from '../data/schoolInfo';
+import {
+  SeatAssignment,
+  isAcademicSection,
+  sectionAcceptsStudent,
+  getSectionFill,
+  validateSectionCapacity,
+  getWaitingStudents,
+  planSeatFilling,
+  applyAssignmentsToSections,
+  nextLetterIndex
+} from '../utils/sectionCapacity';
 
 interface RegistrarAdminPageProps {
   teachers: Teacher[];
   sections: GradeSection[];
   onAddSections: (newSections: GradeSection[]) => void;
+  /** Saves one changed class in place (used for seat changes and adding students). */
+  onUpdateSection?: (section: GradeSection) => void;
   onUpdateStudents?: (students: any[] | ((prev: any[]) => any[])) => void;
   /** The school's current students: last year's records used for name suggestions. */
   previousYearStudents?: Student[];
@@ -93,6 +108,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   teachers,
   sections,
   onAddSections,
+  onUpdateSection,
   onUpdateStudents,
   previousYearStudents = [],
   lang,
@@ -181,6 +197,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     'combined-smart'
   );
   const [previewBuckets, setPreviewBuckets] = useState<SectionAllocationBucket[] | null>(null);
+  // Existing classes: seat edits and adding students
+  const [seatDrafts, setSeatDrafts] = useState<Record<string, string>>({});
+  const [addPick, setAddPick] = useState<Record<string, string>>({});
+  const [seatsNotice, setSeatsNotice] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null);
+  // Start over: split every student of the grade again instead of keeping existing classes
+  const [reshuffleAll, setReshuffleAll] = useState<boolean>(false);
   const [previewSearchQuery, setPreviewSearchQuery] = useState<string>('');
   const [allocationSuccessMessage, setAllocationSuccessMessage] = useState<string>('');
   const [hasCommittedCurrentPreview, setHasCommittedCurrentPreview] = useState<boolean>(false);
@@ -372,9 +394,206 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     );
   };
 
+  // ---- Existing classes: seats, adding students, filling open seats ---------------------------
+  const saveClass = (updated: GradeSection) => {
+    if (onUpdateSection) onUpdateSection(updated);
+    else onAddSections([updated]);
+  };
+
+  const sameCode = (a?: string, b?: string) => (a || '').toUpperCase().trim() === (b || '').toUpperCase().trim();
+
+  /**
+   * Moves registered students into existing classes: records the class on each student, updates the
+   * class totals, and adds the students to the school's active student list (marks are kept if they
+   * already have a record). Everything is saved to the cloud like a normal edit.
+   */
+  const placeStudentsInClasses = (assignments: SeatAssignment[]) => {
+    if (assignments.length === 0) return;
+    const before = registeredStudents;
+    const byStudent = new Map(assignments.map((a) => [a.studentId, a.sectionCode]));
+    const updatedSections = applyAssignmentsToSections(sections, assignments, before);
+    updatedSections.forEach(saveClass);
+
+    const updatedRegistered = before.map((r) => (byStudent.has(r.id) ? { ...r, allocatedSection: byStudent.get(r.id) } : r));
+    setRegisteredStudents(updatedRegistered);
+    updatedRegistered.forEach((r, i) => {
+      if (r !== before[i]) syncStudentToCloud(r).catch(() => {});
+    });
+
+    if (!onUpdateStudents) return;
+    const secByCode = new Map(updatedSections.map((sec) => [sec.section.toUpperCase().trim(), sec]));
+    const nextRank = new Map<string, number>();
+    updatedSections.forEach((sec) => {
+      const old = sections.find((x) => sameCode(x.section, sec.section));
+      nextRank.set(sec.section.toUpperCase().trim(), old ? getSectionFill(old, before).enrolled : 0);
+    });
+    const registeredById = new Map(before.map((r) => [r.id, r]));
+    const joining = assignments
+      .map((a) => ({ reg: registeredById.get(a.studentId), sec: secByCode.get(a.sectionCode.toUpperCase().trim()) }))
+      .filter((x): x is { reg: RegisteredStudent2019; sec: GradeSection } => Boolean(x.reg && x.sec));
+
+    const inClass = (st: any, sec: GradeSection) =>
+      st.grade === sec.grade && st.section === sec.sectionLetter && (sec.grade < 11 || st.stream === sec.stream);
+
+    onUpdateStudents((prev: any) => {
+      const prevArr: any[] = Array.isArray(prev) ? prev : [];
+      const existingById = new Map(prevArr.map((x) => [x.id, x]));
+      const built = joining.map(({ reg, sec }) => {
+        const key = sec.section.toUpperCase().trim();
+        const rank = (nextRank.get(key) || 0) + 1;
+        nextRank.set(key, rank);
+        const stream = sec.grade >= 11 ? (sec.stream as any) : reg.stream;
+        const existing = existingById.get(reg.id);
+        if (existing) {
+          return { ...existing, grade: sec.grade, section: sec.sectionLetter, stream, totalStudentsInSection: sec.totalStudents };
+        }
+        const template =
+          sec.grade >= 11
+            ? sec.stream === 'Social Science'
+              ? STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
+              : STANDARD_GRADE_11_12_NATURAL_SUBJECTS
+            : STANDARD_GRADE_9_10_SUBJECTS;
+        const subjects = template.map((ts) => ({
+          subjectId: ts.subjectId,
+          subjectName: ts.subjectName,
+          subjectAmharic: ts.subjectAmharic || ts.subjectName,
+          teacherName: ts.teacherName || 'Unassigned',
+          continuousAssessment: 0,
+          midExam: 0,
+          finalExam: 0,
+          totalScore: 0
+        }));
+        return {
+          id: reg.id,
+          studentId: reg.studentId,
+          fullName: reg.fullName,
+          fullNameAmharic: reg.fullNameAmharic || reg.fullName,
+          gender: reg.gender,
+          grade: sec.grade,
+          section: sec.sectionLetter,
+          stream,
+          cteSpecialization: reg.cteSection ? reg.cteSpecialization : undefined,
+          academicYear: SCHOOL_INFO.registrationYear,
+          homeroomTeacher: sec.homeroomTeacher?.id ? sec.homeroomTeacher.name : 'To be assigned',
+          guardianName: reg.guardianName || 'Parent/Guardian',
+          guardianPhone: reg.guardianPhone || '+251 91 000 0000',
+          conduct: reg.conduct || 'A',
+          attendanceRate: 100,
+          rank,
+          totalStudentsInSection: sec.totalStudents,
+          semesters: [
+            { semester: 1 as const, subjects },
+            { semester: 2 as const, subjects }
+          ]
+        };
+      });
+      const newIds = new Set(built.map((b) => b.id));
+      const kept = prevArr
+        .filter((x) => !newIds.has(x.id))
+        .map((x) => {
+          const sec = updatedSections.find((u) => inClass(x, u));
+          return sec ? { ...x, totalStudentsInSection: sec.totalStudents } : x;
+        });
+      return [...kept, ...built];
+    });
+  };
+
+  /** Plain-language summary like "9A +6, 9B +4". */
+  const summarizePlacement = (assignments: SeatAssignment[]) => {
+    const counts = new Map<string, number>();
+    assignments.forEach((a) => counts.set(a.sectionCode, (counts.get(a.sectionCode) || 0) + 1));
+    return Array.from(counts.entries())
+      .map(([code, n]) => `${code} +${n}`)
+      .join(', ');
+  };
+
+  const handleSaveSeats = (sec: GradeSection) => {
+    const raw = seatDrafts[sec.id];
+    if (raw === undefined) return;
+    const wanted = Math.floor(Number(raw));
+    const check = validateSectionCapacity(sec, wanted, registeredStudents);
+    if (!check.ok) {
+      setSeatsNotice({
+        kind: 'warn',
+        text: T(
+          `${sec.section} already has ${check.minimum} students, so it needs at least ${check.minimum} seats.`,
+          `${sec.section} ቀድሞ ${check.minimum} ተማሪዎች አሉት፤ ቢያንስ ${check.minimum} መቀመጫ ያስፈልገዋል።`
+        )
+      });
+      return;
+    }
+    saveClass({ ...sec, capacity: wanted });
+    setSeatDrafts((prev) => {
+      const next = { ...prev };
+      delete next[sec.id];
+      return next;
+    });
+    setSeatsNotice({
+      kind: 'ok',
+      text: T(`${sec.section} now has ${wanted} seats.`, `${sec.section} አሁን ${wanted} መቀመጫ አለው።`)
+    });
+  };
+
+  const handleAddStudentToClass = (sec: GradeSection) => {
+    const studentId = addPick[sec.id];
+    const st = registeredStudents.find((r) => r.id === studentId);
+    if (!st) return;
+    const fill = getSectionFill(sec, registeredStudents);
+    if (fill.free <= 0) {
+      setSeatsNotice({
+        kind: 'warn',
+        text: T(`${sec.section} is full. Add seats first.`, `${sec.section} ሞልቷል። መጀመሪያ መቀመጫ ይጨምሩ።`)
+      });
+      return;
+    }
+    if (!sectionAcceptsStudent(sec, st)) return;
+    placeStudentsInClasses([{ studentId: st.id, sectionCode: sec.section }]);
+    setAddPick((prev) => ({ ...prev, [sec.id]: '' }));
+    setSeatsNotice({
+      kind: 'ok',
+      text: T(`${st.fullName} was added to ${sec.section}.`, `${st.fullNameAmharic || st.fullName} ወደ ${sec.section} ተጨምሯል።`)
+    });
+  };
+
+  const handleFillOpenSeats = () => {
+    const waiting = getWaitingStudents(
+      registeredStudents,
+      sections,
+      allocationGrade,
+      allocationGrade >= 11 ? allocationStream : undefined
+    );
+    const plan = planSeatFilling(waiting, sections, registeredStudents);
+    if (plan.assignments.length === 0) {
+      setSeatsNotice({
+        kind: 'warn',
+        text:
+          waiting.length === 0
+            ? T('No students are waiting for a class.', 'ክፍል የሚጠብቅ ተማሪ የለም።')
+            : T('No class has an open seat for the waiting students. Add seats to a class first.', 'ለሚጠብቁ ተማሪዎች ባዶ መቀመጫ ያለው ክፍል የለም። መጀመሪያ መቀመጫ ይጨምሩ።')
+      });
+      return;
+    }
+    placeStudentsInClasses(plan.assignments);
+    setSeatsNotice({
+      kind: 'ok',
+      text: T(
+        `${plan.assignments.length} students moved into open seats (${summarizePlacement(plan.assignments)}).${plan.remaining.length ? ` ${plan.remaining.length} still waiting.` : ''}`,
+        `${plan.assignments.length} ተማሪዎች ባዶ መቀመጫ ወዳላቸው ክፍሎች ተዛውረዋል (${summarizePlacement(plan.assignments)})።${plan.remaining.length ? ` ${plan.remaining.length} አሁንም ይጠብቃሉ።` : ''}`
+      )
+    });
+  };
+
+  // Classes already created for the grade (and stream) being worked on, and students still waiting
+  const classesHere = sections
+    .filter((sec) => isAcademicSection(sec) && sec.grade === allocationGrade && (allocationGrade < 11 || sec.stream === allocationStream))
+    .sort((a, b) => (a.sectionLetter || '').localeCompare(b.sectionLetter || '') || a.section.localeCompare(b.section));
+  const waitingHere = getWaitingStudents(registeredStudents, sections, allocationGrade, allocationGrade >= 11 ? allocationStream : undefined);
+  const openSeatsHere = classesHere.reduce((acc, sec) => acc + getSectionFill(sec, registeredStudents).free, 0);
+
   // Generate Section Allocation Preview
   const handleGenerateAllocation = () => {
-    const candidates = registeredStudents.filter((s) => {
+    const streamFilter = allocationGrade >= 11 ? allocationStream : undefined;
+    const gradeStudents = registeredStudents.filter((s) => {
       if (s.targetGrade !== allocationGrade) return false;
       if (allocationGrade >= 11) {
         return s.stream === allocationStream;
@@ -382,7 +601,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       return true;
     });
 
-    if (candidates.length === 0) {
+    if (gradeStudents.length === 0) {
       alert(
         lang === 'am'
           ? `ለ${allocationGrade}ኛ ክፍል ${
@@ -397,23 +616,63 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       return;
     }
 
+    // Normal case: students already in a class stay there. Only students still waiting are placed,
+    // first into open seats of classes that already exist, then into new classes.
+    // "Start over" re-divides everyone and replaces classes that have the same code.
+    let candidates = gradeStudents;
+    let placedMessage = '';
+    if (!reshuffleAll) {
+      candidates = getWaitingStudents(registeredStudents, sections, allocationGrade, streamFilter);
+      if (candidates.length === 0) {
+        setPreviewBuckets(null);
+        setCteUnplaced([]);
+        setAllocationSuccessMessage('');
+        setAllocationNotice(
+          T(
+            'Every registered student of this grade is already in a class. Register new students first, or use “Start over” to divide everyone again.',
+            'የዚህ ክፍል ደረጃ ሁሉም የተመዘገቡ ተማሪዎች ክፍል አግኝተዋል። አዲስ ተማሪዎችን ይመዝግቡ፣ ወይም ሁሉንም እንደገና ለመከፋፈል “እንደገና ጀምር” ይጠቀሙ።'
+          )
+        );
+        return;
+      }
+      const plan = planSeatFilling(candidates, sections, registeredStudents);
+      if (plan.assignments.length > 0) {
+        placeStudentsInClasses(plan.assignments);
+        placedMessage = T(
+          `${plan.assignments.length} students were moved into open seats of existing classes (${summarizePlacement(plan.assignments)}).`,
+          `${plan.assignments.length} ተማሪዎች ባዶ መቀመጫ ወዳላቸው ነባር ክፍሎች ተዛውረዋል (${summarizePlacement(plan.assignments)})።`
+        );
+      }
+      candidates = plan.remaining;
+      if (candidates.length === 0) {
+        setPreviewBuckets(null);
+        setCteUnplaced([]);
+        setAllocationNotice('');
+        setAllocationSuccessMessage(`${placedMessage} ${T('No new class is needed.', 'አዲስ ክፍል አያስፈልግም።')}`);
+        return;
+      }
+    }
+
     const options = {
       grade: allocationGrade,
-      stream:
-        allocationGrade >= 11
-          ? allocationStream
-          : undefined,
+      stream: streamFilter,
       studentsPerSection: allocationMethod === 'by-size' ? studentsPerSection : undefined,
       numSections: allocationMethod === 'by-count' ? numSectionsInput : undefined,
       mode: allocationMode,
-      targetCapacity
+      targetCapacity,
+      // New classes continue after the ones that exist (9A, 9B exist -> new ones are 9C, 9D)
+      startLetterIndex: reshuffleAll ? 0 : nextLetterIndex(sections, allocationGrade, streamFilter)
     };
 
     const buckets = allocateStudentsToSections(candidates, options);
     setCteUnplaced([]);
-    setAllocationNotice('');
-    setPreviewBuckets(buckets);
-    setAllocationSuccessMessage('');
+    setAllocationNotice(
+      buckets.length === 0
+        ? T('There are no more class letters left for this grade.', 'ለዚህ ክፍል ደረጃ የቀሩ የክፍል ፊደላት የሉም።')
+        : ''
+    );
+    setPreviewBuckets(buckets.length ? buckets : null);
+    setAllocationSuccessMessage(placedMessage);
     setHasCommittedCurrentPreview(false);
     setShowCommitSuccessModal(false);
   };
@@ -573,6 +832,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
         totalStudents: bucket.students.length,
         maleStudents: bucket.maleCount,
         femaleStudents: bucket.femaleCount,
+        capacity: bucket.maxCapacity || targetCapacity,
         homeroomTeacher: {
           id: '',
           name: lang === 'am' ? 'ያልተመደበ (Unassigned)' : 'Unassigned (ያልተመደበ)',
@@ -1495,6 +1755,24 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
               )}
 
+              {allocationKind === 'academic' && classesHere.length > 0 && (
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={reshuffleAll}
+                    onChange={(e) => { setReshuffleAll(e.target.checked); setPreviewBuckets(null); }}
+                    className="mt-0.5 h-4 w-4 cursor-pointer accent-emerald-600"
+                  />
+                  <span>
+                    <b className="text-slate-800">{T('Start over', 'እንደገና ጀምር')}</b>{' '}
+                    {T(
+                      'Divide every student of this grade again. Classes with the same letter are replaced and their teachers are cleared. Leave this off to keep existing classes and only place students who are waiting.',
+                      'የዚህን ክፍል ደረጃ ሁሉንም ተማሪዎች እንደገና ይከፋፍሉ። ተመሳሳይ ፊደል ያላቸው ክፍሎች ይተካሉ፤ መምህራንም ይጠረዛሉ። ነባር ክፍሎችን ለማቆየትና የሚጠብቁትን ብቻ ለመመደብ ይህን ባዶ ያድርጉት።'
+                    )}
+                  </span>
+                </label>
+              )}
+
               {allocationNotice && (
                 <div role="alert" className="fade-up flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1514,6 +1792,152 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               </div>
             </div>
           </div>
+
+          {/* CLASSES & SEATS: change seats and add students after a class exists */}
+          {allocationKind === 'academic' && classesHere.length > 0 && (
+            <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="flex items-center gap-2 text-base font-black text-slate-900">
+                    <Armchair className="h-5 w-5 text-emerald-700" />
+                    {T('Classes and seats', 'ክፍሎችና መቀመጫዎች')} · {T('Grade', 'ክፍል')} {allocationGrade}
+                    {allocationGrade >= 11 ? ` (${allocationStream === 'Natural Science' ? T('Natural Science', 'የተፈጥሮ ሳይንስ') : T('Social Science', 'የማህበራዊ ሳይንስ')})` : ''}
+                  </h4>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+                    {T(
+                      'Change the seats of a class at any time, or add a waiting student by hand. When you press “Preview classes”, waiting students are moved into open seats first. Only students who do not fit are put into new classes.',
+                      'የአንድ ክፍል መቀመጫ በማንኛውም ጊዜ ይቀይሩ፣ ወይም የሚጠብቅ ተማሪ በእጅ ይጨምሩ። “ክፍሎችን ቅድመ እይታ” ሲጫኑ የሚጠብቁ ተማሪዎች መጀመሪያ ባዶ መቀመጫ ወዳላቸው ክፍሎች ይገባሉ። የማይመጥኑት ብቻ ወደ አዲስ ክፍሎች ይገባሉ።'
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex gap-2 text-[11px] font-bold">
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-900">{waitingHere.length} {T('waiting', 'በመጠበቅ ላይ')}</span>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-900">{openSeatsHere} {T('open seats', 'ባዶ መቀመጫ')}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleFillOpenSeats}
+                    disabled={waitingHere.length === 0 || openSeatsHere === 0}
+                    className="flex items-center gap-1.5 rounded-full bg-slate-950 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                  >
+                    <Users className="h-3.5 w-3.5 text-amber-300" />
+                    {T('Fill open seats now', 'ባዶ መቀመጫዎችን አሁን ሙላ')}
+                  </button>
+                </div>
+              </div>
+
+              {seatsNotice && (
+                <div
+                  role="status"
+                  className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-2.5 text-xs font-semibold ${
+                    seatsNotice.kind === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'
+                  }`}
+                >
+                  <span>{seatsNotice.text}</span>
+                  <button type="button" onClick={() => setSeatsNotice(null)} aria-label="Dismiss" className="cursor-pointer opacity-60 hover:opacity-100">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                {classesHere.map((sec) => {
+                  const fill = getSectionFill(sec, registeredStudents);
+                  const draft = seatDrafts[sec.id];
+                  const draftNum = draft === undefined ? fill.capacity : Math.floor(Number(draft));
+                  const changed = draft !== undefined && draftNum !== fill.capacity;
+                  const pct = Math.min(100, Math.round((fill.enrolled / fill.capacity) * 100));
+                  const eligible = waitingHere.filter((r) => sectionAcceptsStudent(sec, r));
+                  const full = fill.free <= 0;
+                  return (
+                    <div key={sec.id} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-mono text-lg font-black text-slate-900">{sec.section}</div>
+                          <div className="text-[11px] text-slate-500">
+                            {sec.roomNumber || '—'} · {fill.male} {T('boys', 'ወንድ')} / {fill.female} {T('girls', 'ሴት')}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`font-mono text-lg font-black ${fill.enrolled > fill.capacity ? 'text-rose-600' : 'text-slate-900'}`}>
+                            {fill.enrolled} / {fill.capacity}
+                          </div>
+                          <div className={`text-[11px] font-bold ${full ? 'text-rose-600' : 'text-emerald-700'}`}>
+                            {full ? T('Class is full', 'ክፍሉ ሞልቷል') : `${fill.free} ${T('seats free', 'ባዶ መቀመጫ')}`}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
+                        <div className={`h-full rounded-full ${full ? 'bg-rose-500' : pct > 85 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className={labelCls} htmlFor={`seats-${sec.id}`}>{T('Seats in this class', 'የክፍሉ መቀመጫ')}</label>
+                          <div className="flex gap-2">
+                            <input
+                              id={`seats-${sec.id}`}
+                              type="number"
+                              min={Math.max(1, fill.enrolled)}
+                              value={draft ?? String(fill.capacity)}
+                              onChange={(e) => setSeatDrafts((prev) => ({ ...prev, [sec.id]: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSeats(sec); }}
+                              className={`${inputCls} font-mono`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveSeats(sec)}
+                              disabled={!changed}
+                              className="shrink-0 rounded-xl bg-emerald-600 px-3.5 text-xs font-bold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                            >
+                              {T('Save', 'አስቀምጥ')}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className={labelCls} htmlFor={`add-${sec.id}`}>{T('Add a waiting student', 'የሚጠብቅ ተማሪ ጨምር')}</label>
+                          <div className="flex gap-2">
+                            <select
+                              id={`add-${sec.id}`}
+                              value={addPick[sec.id] || ''}
+                              onChange={(e) => setAddPick((prev) => ({ ...prev, [sec.id]: e.target.value }))}
+                              disabled={full || eligible.length === 0}
+                              className={`${inputCls} disabled:bg-slate-100 disabled:text-slate-400`}
+                            >
+                              <option value="">
+                                {full
+                                  ? T('No seats free', 'ባዶ መቀመጫ የለም')
+                                  : eligible.length === 0
+                                  ? T('No one is waiting', 'የሚጠብቅ የለም')
+                                  : T('Choose a student…', 'ተማሪ ይምረጡ…')}
+                              </option>
+                              {eligible.map((r) => (
+                                <option key={r.id} value={r.id}>
+                                  {r.fullName} ({r.studentId})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => handleAddStudentToClass(sec)}
+                              disabled={!addPick[sec.id] || full}
+                              aria-label={T('Add student', 'ተማሪ ጨምር')}
+                              className="shrink-0 rounded-xl bg-slate-950 px-3 text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* CTE results: who got which choice, and who is left without a seat */}
           {allocationKind === 'cte' && (previewBuckets || cteUnplaced.length > 0) && (

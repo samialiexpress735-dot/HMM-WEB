@@ -192,6 +192,8 @@ export interface GradeSection {
   totalStudents: number;
   maleStudents: number;
   femaleStudents: number;
+  /** Seats in the classroom. Editable after the section is created. Falls back to 45 when missing. */
+  capacity?: number;
   homeroomTeacher: {
     id: string;
     name: string;

@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS grade_sections (
   total_students INT DEFAULT 0,
   male_students INT DEFAULT 0,
   female_students INT DEFAULT 0,
+  capacity INT DEFAULT 45,            -- seats in the classroom (editable by the registrar)
   homeroom_teacher_name TEXT,
   room_number TEXT,
   building_block TEXT,

@@ -461,6 +461,7 @@ export default function App() {
               teachers={teachers}
               sections={sections}
               onAddSections={handleAddSections}
+              onUpdateSection={handleUpdateSection}
               onUpdateStudents={handleUpdateStudents}
               previousYearStudents={students}
               lang={lang}
