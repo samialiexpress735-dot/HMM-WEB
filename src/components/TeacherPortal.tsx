@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { AttendanceTab } from './AttendanceTab';
+import { useAttendance } from '../hooks/useAttendance';
 import {
   Users,
   CheckCircle,
@@ -114,7 +116,62 @@ interface ClassAnnouncement {
   dueDate?: string;
 }
 
-export const TeacherPortal: React.FC<TeacherPortalProps> = ({
+/** Spreadsheet-style score cell: edits stay local until Enter/blur, then save once.
+ *  Enter / ↓ moves down the column, ↑ moves up, Esc reverts. Values over the max are flagged live. */
+const ScoreCell: React.FC<{
+  value: number; max: number; isBonus?: boolean; row: number; col: number; label: string;
+  onCommit: (n: number) => void;
+}> = ({ value, max, isBonus, row, col, label, onCommit }) => {
+  const show = (v: number) => (v === 0 ? '' : String(v));
+  const [draft, setDraft] = React.useState<string>(show(value));
+  const focused = React.useRef(false);
+  React.useEffect(() => { if (!focused.current) setDraft(show(value)); }, [value]);
+
+  const num = draft === '' ? 0 : Number(draft);
+  const invalid = draft !== '' && (isNaN(num) || num > max);
+  const commit = () => {
+    focused.current = false;
+    if (draft === '') { if (value !== 0) onCommit(0); return; }
+    if (isNaN(num)) { setDraft(show(value)); return; }
+    const c = Math.max(0, Math.min(max, num));
+    setDraft(show(c));
+    if (c !== value) onCommit(c);
+  };
+  const move = (d: number) =>
+    (document.querySelector(`[data-cell="${row + d}:${col}"]`) as HTMLInputElement | null)?.focus();
+
+  return (
+    <input
+      data-cell={`${row}:${col}`}
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder="–"
+      aria-label={label}
+      aria-invalid={invalid}
+      title={invalid ? `Maximum is ${max}` : `Out of ${max}${isBonus ? ' (bonus)' : ''}`}
+      onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+      onChange={(e) => { if (/^\d*\.?\d*$/.test(e.target.value)) setDraft(e.target.value); }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); commit(); move(1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); commit(); move(-1); }
+        else if (e.key === 'Escape') { setDraft(show(value)); e.currentTarget.blur(); }
+      }}
+      className={`w-[68px] h-9 text-center font-mono text-sm rounded-lg border outline-none transition-colors ${
+        invalid
+          ? 'border-rose-400 bg-rose-50 text-rose-700 ring-2 ring-rose-200'
+          : isBonus
+          ? 'border-amber-300 bg-amber-50 text-amber-900 font-bold focus:ring-2 focus:ring-amber-300'
+          : draft === ''
+          ? 'border-dashed border-slate-300 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200'
+          : 'border-slate-200 bg-white text-slate-900 font-semibold focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200'
+      }`}
+    />
+  );
+};
+
+const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
   students,
   onUpdateStudents,
   teachers,
@@ -148,9 +205,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(initialSubjectId);
   const [selectedSemester, setSelectedSemester] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<'marks' | 'attendance' | 'roster' | 'notices'>('marks');
-  const [attendanceViewMode, setAttendanceViewMode] = useState<'spreadsheet' | 'daily'>('spreadsheet');
-  const [attendanceDates] = useState<string[]>(() => getRecentSchoolDays(12));
-  const [attendanceMatrix, setAttendanceMatrix] = useState<Record<string, Record<string, 'Present' | 'Absent' | 'Late' | 'Permission'>>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
@@ -375,7 +429,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       <div className="max-w-2xl mx-auto py-8 px-4 animate-in fade-in duration-300">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
           {/* Header */}
-          <div className="p-6 sm:p-8 bg-[#0a1120] text-white border-b border-slate-800 text-center relative">
+          <div className="p-6 sm:p-8 bg-[#070b16] text-white border-b border-slate-800 text-center relative">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-600 to-slate-900 border border-emerald-400/30 shadow-md mb-3">
               <span className="font-bold text-lg text-amber-300">HMM</span>
             </div>
@@ -826,178 +880,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     onUpdateStudents(updated);
   };
 
-  // Attendance Handlers & Historical Matrix Synchronization
-  React.useEffect(() => {
-    if (!selectedSection) return;
-    const storageKey = `hmm_attendance_matrix_${selectedSection}`;
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setAttendanceMatrix(JSON.parse(saved));
-        return;
-      }
-    } catch {}
-
-    // Generate clean, realistic historical attendance matrix across past school days
-    const initial: Record<string, Record<string, 'Present' | 'Absent' | 'Late' | 'Permission'>> = {};
-    sectionStudents.forEach((student, sIdx) => {
-      initial[student.id] = {};
-      attendanceDates.forEach((dateStr, dIdx) => {
-        const seed = (sIdx * 17 + dIdx * 31) % 100;
-        let st: 'Present' | 'Absent' | 'Late' | 'Permission' = 'Present';
-        if (seed > 92) st = 'Absent';
-        else if (seed > 85) st = 'Late';
-        else if (seed > 80) st = 'Permission';
-        initial[student.id][dateStr] = st;
-      });
-    });
-    setAttendanceMatrix(initial);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(initial));
-    } catch {}
-  }, [selectedSection, sectionStudents.length, attendanceDates]);
-
-  const handleAttendanceChange = (
-    studentId: string,
-    status: 'Present' | 'Absent' | 'Late' | 'Permission'
-  ) => {
-    const updated = students.map((s) => (s.id === studentId ? { ...s, attendanceStatus: status } : s));
-    onUpdateStudents(updated);
-
-    // Sync to today's date in matrix
-    const todayStr = attendanceDates[attendanceDates.length - 1];
-    if (todayStr) {
-      setAttendanceMatrix((prev) => {
-        const next = {
-          ...prev,
-          [studentId]: {
-            ...(prev[studentId] || {}),
-            [todayStr]: status
-          }
-        };
-        if (selectedSection) {
-          try {
-            localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(next));
-          } catch {}
-        }
-        return next;
-      });
-    }
-  };
-
-  const handleMatrixCellClick = (studentId: string, dateStr: string) => {
-    const current = attendanceMatrix[studentId]?.[dateStr] || 'Present';
-    const cycle: Record<'Present' | 'Absent' | 'Late' | 'Permission', 'Present' | 'Absent' | 'Late' | 'Permission'> = {
-      Present: 'Absent',
-      Absent: 'Late',
-      Late: 'Permission',
-      Permission: 'Present'
-    };
-    const nextStatus = cycle[current] || 'Present';
-
-    const updated = {
-      ...attendanceMatrix,
-      [studentId]: {
-        ...(attendanceMatrix[studentId] || {}),
-        [dateStr]: nextStatus
-      }
-    };
-    setAttendanceMatrix(updated);
-    if (selectedSection) {
-      try {
-        localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(updated));
-      } catch {}
-    }
-
-    // If modifying today's date (the last date), also sync student.attendanceStatus
-    if (dateStr === attendanceDates[attendanceDates.length - 1]) {
-      const updatedStudents = students.map((s) => (s.id === studentId ? { ...s, attendanceStatus: nextStatus } : s));
-      onUpdateStudents(updatedStudents);
-    }
-  };
-
-  const handleMatrixMarkAllTodayPresent = () => {
-    const todayStr = attendanceDates[attendanceDates.length - 1];
-    const updated = { ...attendanceMatrix };
-    sectionStudents.forEach((s) => {
-      if (!updated[s.id]) updated[s.id] = {};
-      updated[s.id][todayStr] = 'Present';
-    });
-    setAttendanceMatrix(updated);
-    if (selectedSection) {
-      try {
-        localStorage.setItem(`hmm_attendance_matrix_${selectedSection}`, JSON.stringify(updated));
-      } catch {}
-    }
-    handleMarkAllPresent();
-  };
-
-  const handleExportAttendanceMatrixCSV = () => {
-    const headers = [
-      '#',
-      'Student ID',
-      'Full Name',
-      'Amharic Name',
-      'CTE Elective',
-      ...attendanceDates.map((d) => `"${formatMatrixDate(d).full}"`),
-      'Present Days',
-      'Absent Days',
-      'Late Days',
-      'Attendance Rate (%)'
-    ];
-
-    const rows = filteredStudents.map((s, idx) => {
-      const studentRecords = attendanceMatrix[s.id] || {};
-      let present = 0;
-      let absent = 0;
-      let late = 0;
-      const dateValues = attendanceDates.map((d) => {
-        const st = studentRecords[d] || 'Present';
-        if (st === 'Present') present++;
-        else if (st === 'Absent') absent++;
-        else if (st === 'Late') late++;
-        return st;
-      });
-      const totalDays = attendanceDates.length || 1;
-      const rate = Math.round(((present + late * 0.5) / totalDays) * 100);
-
-      return [
-        idx + 1,
-        `"${s.studentId}"`,
-        `"${s.fullName}"`,
-        `"${s.fullNameAmharic || ''}"`,
-        `"${s.cteSpecialization || 'None'}"`,
-        ...dateValues.map((v) => `"${v}"`),
-        present,
-        absent,
-        late,
-        `"${rate}%"`
-      ].join(',');
-    });
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Attendance_Matrix_Section_${selectedSection || 'Class'}_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleMarkAllPresent = () => {
-    const studentIdsInSection = new Set(sectionStudents.map((s) => s.id));
-    const updated = students.map((s) => {
-      if (studentIdsInSection.has(s.id)) {
-        return { ...s, attendanceStatus: 'Present' as const };
-      }
-      return s;
-    });
-    onUpdateStudents(updated);
-    setSaveSuccessMsg(`All students in Section ${selectedSection || ''} marked Present!`);
-    setTimeout(() => setSaveSuccessMsg(''), 3000);
-  };
+  // Attendance: saved on this device first, then synced to Supabase (see hooks/useAttendance.ts)
+  const att = useAttendance(selectedSection, activeTeacherUser?.name);
 
   const handleSaveMarks = () => {
     setSaveSuccessMsg(`Marks successfully saved for Section ${selectedSection || ''} (${selectedSubjectId.toUpperCase()})!`);
@@ -1091,10 +975,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const passCount = marksList.filter((m) => m >= 50).length;
   const passRate = marksList.length ? Math.round((passCount / marksList.length) * 100) : 0;
 
-  const presentCount = sectionStudents.filter((s) => s.attendanceStatus === 'Present').length;
-  const attendanceRate = sectionStudents.length
-    ? Math.round((presentCount / sectionStudents.length) * 100)
-    : 0;
+  const todayMarks = sectionStudents.map((st) => att.map[st.id]?.[att.today]?.status).filter(Boolean);
+  const attendanceRate = todayMarks.length
+    ? `${Math.round((todayMarks.filter((x) => x === 'Present' || x === 'Late').length / todayMarks.length) * 100)}%`
+    : '–';
 
   // RENDER 1: SECTIONS HUB (Shown when teacher first logs in; no student list is shown yet)
   if (!selectedSection) {
@@ -1315,23 +1199,24 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* 1. SECTION WORKSPACE HEADER WITH TOP ACTION BAR (The Common Place for Action Buttons) */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+      <div className="relative overflow-hidden rounded-3xl bg-slate-950 text-white p-6 space-y-4">
+        <div className="academic-ribbon absolute inset-x-0 top-0" aria-hidden="true" />
         {/* Top Context & Navigation Bar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={() => setSelectedSection(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/15 text-slate-100 text-xs font-bold rounded-xl transition-colors cursor-pointer"
               title="Return to sections list"
             >
-              <ArrowLeft className="w-3.5 h-3.5 text-slate-600" />
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-300" />
               <span>{lang === 'am' ? 'ወደ ክፍሎች ዝርዝር' : 'All Sections'}</span>
             </button>
 
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-xl font-black text-slate-900">Section {selectedSection}</h2>
-                <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <h2 className="text-xl font-black text-white">Section {selectedSection}</h2>
+                <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-400/15 text-emerald-300 border border-emerald-400/30">
                   {currentSubjectObj?.subjectName || activeTeacherUser.subject}
                 </span>
                 {currentSectionObj?.isCteSection && (
@@ -1345,7 +1230,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5">
                 Instructor: <strong>{activeTeacherUser.name}</strong> • Academic Year: <strong>2017 E.C. (2017 ዓ.ም.)</strong> • {sectionStudents.length} Students Enrolled
               </p>
             </div>
@@ -1353,12 +1238,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* Quick Section Switcher */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+            <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-white/10 border border-white/10 rounded-xl px-2.5 py-1">
               <span className="font-semibold hidden sm:inline">Section:</span>
               <select
                 value={selectedSection}
                 onChange={(e) => setSelectedSection(e.target.value)}
-                className="bg-transparent font-bold text-slate-900 text-xs outline-none cursor-pointer"
+                className="bg-transparent font-bold text-white [&>option]:text-white text-xs outline-none cursor-pointer"
               >
                 {visibleSections.map((s) => (
                   <option key={s} value={s}>
@@ -1369,11 +1254,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </div>
 
             {/* Semester Switcher */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl shrink-0">
+            <div className="flex items-center gap-1 p-1 bg-white/10 rounded-xl shrink-0">
               <button
                 onClick={() => setSelectedSemester(1)}
                 className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                  selectedSemester === 1 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  selectedSemester === 1 ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
                 }`}
               >
                 Semester 1
@@ -1381,7 +1266,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <button
                 onClick={() => setSelectedSemester(2)}
                 className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                  selectedSemester === 2 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  selectedSemester === 2 ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'
                 }`}
               >
                 Semester 2
@@ -1392,10 +1277,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               <button
                 type="button"
                 onClick={onNavigateHome}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer ml-1"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/15 text-slate-100 border border-white/10 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer ml-1"
                 title="View Public School Website"
               >
-                <Globe className="w-3.5 h-3.5 text-emerald-700" />
+                <Globe className="w-3.5 h-3.5 text-emerald-300" />
                 <span className="hidden sm:inline">Public Site</span>
               </button>
             )}
@@ -1403,10 +1288,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             {onSignOutTeacher && (
               <button
                 onClick={onSignOutTeacher}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-400/20 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
                 title="Sign out"
               >
-                <LogOut className="w-3.5 h-3.5 text-rose-600" />
+                <LogOut className="w-3.5 h-3.5 text-rose-300" />
                 <span className="hidden sm:inline">Sign Out</span>
               </button>
             )}
@@ -1418,13 +1303,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {/* Subject Selector */}
             {availableSubjects.length > 1 && (
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
-                <BookOpen className="w-3.5 h-3.5 text-emerald-700" />
-                <span className="font-semibold text-slate-600">Subject:</span>
+              <div className="flex items-center gap-1.5 bg-white/10 border border-white/10 rounded-xl px-3 py-1.5 text-xs">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-300" />
+                <span className="font-semibold text-slate-300">Subject:</span>
                 <select
                   value={selectedSubjectId}
                   onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="bg-transparent font-bold text-slate-900 outline-none cursor-pointer"
+                  className="bg-transparent font-bold text-white [&>option]:text-white outline-none cursor-pointer"
                 >
                   {availableSubjects.map((sub) => (
                     <option key={sub.subjectId} value={sub.subjectId}>
@@ -1443,7 +1328,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                 placeholder="Search students in Section..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white/10 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
@@ -1458,13 +1343,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
                   title="Add customizable assessment column with custom max score and bonus points"
                 >
-                  <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                  <Plus className="w-3.5 h-3.5 text-emerald-300" />
                   <span>{lang === 'am' ? 'የውጤት መስክ አክል (+)' : '+ Add Assessment Column'}</span>
                 </button>
 
                 <button
                   onClick={handleExportCSV}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/15 text-slate-100 border border-white/10 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
                   title="Download marks roster spreadsheet (CSV)"
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-600" />
@@ -1481,54 +1366,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </>
             )}
 
-            {activeTab === 'attendance' && (
-              <>
-                <div className="inline-flex items-center bg-slate-100 rounded-xl p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setAttendanceViewMode('spreadsheet')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                      attendanceViewMode === 'spreadsheet'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Past Days Spreadsheet</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAttendanceViewMode('daily')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                      attendanceViewMode === 'daily'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <CheckCircle className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Daily Roll Call</span>
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleExportAttendanceMatrixCSV}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold rounded-xl shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
-                  title="Export complete attendance matrix to CSV"
-                >
-                  <Download className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Export Matrix CSV</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleMatrixMarkAllTodayPresent}
-                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-sm transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  ✓ Mark Today All Present
-                </button>
-              </>
-            )}
 
             {activeTab === 'notices' && (
               <button
@@ -1572,7 +1409,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="text-xs font-medium text-slate-500">Attendance Rate</div>
           <div className="text-2xl font-bold text-amber-600 font-mono mt-1 tabular-nums">
-            {attendanceRate}%
+            {attendanceRate}
           </div>
         </div>
       </div>
@@ -1631,7 +1468,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   📅
                 </span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'attendance' ? 'bg-emerald-800 text-emerald-100 border border-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                  Rate: {attendanceRate}%
+                  Rate: {attendanceRate}
                 </span>
               </div>
               <div className={`font-black text-sm ${activeTab === 'attendance' ? 'text-white' : 'text-slate-900'}`}>
@@ -1716,398 +1553,150 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       {/* 4. ACTIVE SECTION WORKSPACE WORKAREA */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* TAB 1: MARKS & CONTINUOUS ASSESSMENT */}
-        {activeTab === 'marks' && (
-          <div className="overflow-x-auto">
-            <div className="px-4 py-2.5 bg-emerald-50/70 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-emerald-950 flex-wrap">
-                <BookOpen className="w-4 h-4 text-emerald-700 shrink-0" />
-                <span>
-                  Active Subject: <strong className="font-bold">{currentSubjectObj?.subjectName || activeTeacherUser.subject}</strong> ({currentSubjectObj?.subjectAmharic || ''})
+        {activeTab === 'marks' && (() => {
+          const baseTotal = assessmentColumns.filter((c) => !c.isBonus).reduce((t, c) => t + c.maxScore, 0);
+          const sums = filteredStudents.map((st) => calculateStudentCustomSummary(st));
+          const scored = sums.filter((x) => x.totalEarned > 0);
+          const avg = scored.length ? Math.round((scored.reduce((t, x) => t + x.percentage, 0) / scored.length) * 10) / 10 : 0;
+          const top = scored.length ? Math.max(...scored.map((x) => x.percentage)) : 0;
+          const low = scored.length ? Math.min(...scored.map((x) => x.percentage)) : 0;
+          const atRisk = scored.filter((x) => x.percentage < 50).length;
+          const tone = (pct: number) =>
+            pct >= 80 ? 'bg-emerald-100 text-emerald-800' : pct >= 50 ? 'bg-sky-100 text-sky-800' : 'bg-rose-100 text-rose-800';
+          const bar = (pct: number) => (pct >= 80 ? 'bg-emerald-500' : pct >= 50 ? 'bg-sky-500' : 'bg-rose-500');
+          return (
+          <div>
+            {/* Context + summary strip */}
+            <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500">
+                <span className="flex items-center gap-1.5 text-slate-900 font-semibold text-sm">
+                  <BookOpen className="w-4 h-4 text-emerald-600" />
+                  {currentSubjectObj?.subjectName || activeTeacherUser.subject}
+                  {currentSubjectObj?.subjectAmharic && <span className="text-slate-400 font-normal">({currentSubjectObj.subjectAmharic})</span>}
                 </span>
-                <span className="text-emerald-400">•</span>
-                <span className="text-emerald-800">
-                  Section <strong className="font-bold">{selectedSection}</strong>
-                </span>
-                <span className="text-emerald-400">•</span>
-                <span className="text-emerald-800">
-                  Semester <strong className="font-bold">{selectedSemester}</strong>
-                </span>
+                <span>Class average <b className="font-mono text-slate-900">{scored.length ? `${avg}%` : '–'}</b></span>
+                <span>Highest <b className="font-mono text-emerald-700">{scored.length ? `${top}%` : '–'}</b></span>
+                <span>Lowest <b className="font-mono text-slate-900">{scored.length ? `${low}%` : '–'}</b></span>
+                {atRisk > 0 && <span className="text-rose-700 font-semibold">{atRisk} below 50%</span>}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-emerald-800 font-medium bg-white/80 px-2.5 py-0.5 rounded-lg border border-emerald-200">
-                  Total Assessment Base:{' '}
-                  <strong>{assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)} pts</strong>
-                </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">Graded out of <b className="font-mono text-slate-900">{baseTotal}</b></span>
                 <button
                   type="button"
                   onClick={handleOpenAddColumnModal}
-                  className="text-[11px] text-emerald-700 hover:text-emerald-950 font-bold underline cursor-pointer"
+                  className="btn-academic flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
                 >
-                  + Add Assessment Row/Column
+                  <Plus className="w-3.5 h-3.5 text-amber-300" />
+                  Add assessment
                 </button>
               </div>
             </div>
 
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                  <th className="py-3 px-3 text-center w-12">#</th>
-                  <th className="py-3 px-4 min-w-[200px]">Student Name & ID</th>
-                  {assessmentColumns.map((col) => (
-                    <th key={col.id} className="py-3 px-2 text-center min-w-[120px]">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="font-bold text-slate-900 truncate max-w-[90px]">{col.name}</span>
-                        <div className="flex items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditColumnModal(col)}
-                            className="p-0.5 text-slate-400 hover:text-emerald-700 rounded transition-colors"
-                            title={`Edit ${col.name}`}
-                          >
+            <p className="px-5 py-2 text-[11px] text-slate-500 bg-slate-50 border-b border-slate-200">
+              Type a mark and press <kbd className="px-1 rounded bg-white border border-slate-300 font-mono">Enter</kbd> to save and move to the next student.
+              Arrow keys also move between cells. Marks above the maximum are flagged in red.
+            </p>
+
+            <div className="overflow-auto max-h-[72vh]">
+              <table className="w-full text-left text-xs border-separate border-spacing-0">
+                <thead>
+                  <tr className="text-slate-600">
+                    <th className="sticky top-0 left-0 z-30 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center w-12 min-w-12">#</th>
+                    <th className="sticky top-0 left-12 z-30 bg-slate-100 border-b border-slate-200 py-3 px-4 min-w-[220px] font-semibold">Student</th>
+                    {assessmentColumns.map((col) => (
+                      <th key={col.id} className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-2.5 px-2 text-center min-w-[112px]">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="font-bold text-slate-900 truncate max-w-[90px]">{col.name}</span>
+                          <button type="button" onClick={() => handleOpenEditColumnModal(col)} className="p-1 text-slate-400 hover:text-emerald-700 rounded cursor-pointer" title={`Edit ${col.name}`} aria-label={`Edit ${col.name}`}>
                             <Edit2 className="w-3 h-3" />
                           </button>
                           {assessmentColumns.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteColumn(col.id)}
-                              className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                              title={`Delete ${col.name}`}
-                            >
+                            <button type="button" onClick={() => handleDeleteColumn(col.id)} className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer" title={`Delete ${col.name}`} aria-label={`Delete ${col.name}`}>
                               <Trash2 className="w-3 h-3" />
                             </button>
                           )}
                         </div>
-                      </div>
-                      <span className={`text-[10px] block font-mono ${col.isBonus ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
-                        ({col.maxScore} pts{col.isBonus ? ' • Bonus' : ''})
-                      </span>
-                    </th>
-                  ))}
-                  <th className="py-3 px-3 text-center w-24">
-                    <div>Total</div>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      ({assessmentColumns.filter((c) => !c.isBonus).reduce((s, c) => s + c.maxScore, 0)})
-                    </span>
-                  </th>
-                  <th className="py-3 px-3 text-center w-20">Grade</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-900">
-                {filteredStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan={4 + assessmentColumns.length} className="py-8 text-center text-slate-500">
-                      No students found in Section {selectedSection}.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredStudents.map((student, idx) => {
-                    const summary = calculateStudentCustomSummary(student);
-
-                    return (
-                      <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                        <td className="py-3 px-4 font-semibold">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-slate-900">{student.fullName}</span>
-                            {student.cteSpecialization && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
-                                🛠️ {student.cteSpecialization}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
-                            <span>{student.studentId}</span>
-                            {student.fullNameAmharic && <span className="text-slate-400">({student.fullNameAmharic})</span>}
-                          </div>
-                        </td>
-
-                        {assessmentColumns.map((col) => {
-                          const val = getStudentColumnScore(student, col.id);
-                          return (
-                            <td key={col.id} className="py-3 px-2 text-center">
-                              <input
-                                type="number"
-                                min="0"
-                                max={col.maxScore}
-                                value={val === 0 ? '' : val}
-                                placeholder="0"
-                                onChange={(e) =>
-                                  handleCustomScoreChange(student.id, col.id, Number(e.target.value))
-                                }
-                                className={`w-16 text-center font-mono py-1 rounded-lg border text-xs focus:ring-2 focus:ring-emerald-500 ${
-                                  col.isBonus
-                                    ? 'border-amber-300 bg-amber-50/50 text-amber-950 font-bold'
-                                    : 'border-slate-200 bg-white text-slate-900'
-                                }`}
-                                title={`Max: ${col.maxScore}${col.isBonus ? ' (Bonus)' : ''}`}
-                              />
-                            </td>
-                          );
-                        })}
-
-                        <td className="py-3 px-3 text-center font-mono font-bold text-slate-900 tabular-nums">
-                          {summary.totalEarned}
-                        </td>
-                        <td className="py-3 px-3 text-center font-mono font-bold">
-                          <span
-                            className={`px-2.5 py-0.5 rounded text-[11px] ${
-                              summary.percentage >= 80
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : summary.percentage >= 50
-                                ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                                : 'bg-slate-100 text-slate-800 border border-slate-200'
-                            }`}
-                          >
-                            {summary.letter.letter}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* TAB 2: HISTORICAL ATTENDANCE SPREADSHEET MATRIX & DAILY ROLL CALL */}
-        {activeTab === 'attendance' && (
-          <div className="overflow-x-auto">
-            {attendanceViewMode === 'spreadsheet' ? (
-              <div className="space-y-3 p-4">
-                {/* Spreadsheet Info Header & Legend */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
-                    <div>
-                      <h4 className="font-black text-slate-900 text-sm">
-                        Historical Attendance Matrix (የቀናት አቴንዳንስ ማትሪክስ)
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Past {attendanceDates.length} school days. Click any cell to cycle status: P (Present) → A (Absent) → L (Late) → E (Permission).
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Status Legend */}
-                  <div className="flex items-center gap-2 text-xs flex-wrap">
-                    <span className="flex items-center gap-1 font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      <strong>P</strong> = Present
-                    </span>
-                    <span className="flex items-center gap-1 font-semibold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                      <strong>A</strong> = Absent
-                    </span>
-                    <span className="flex items-center gap-1 font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      <strong>L</strong> = Late
-                    </span>
-                    <span className="flex items-center gap-1 font-semibold text-blue-800 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                      <strong>E</strong> = Excused
-                    </span>
-                  </div>
-                </div>
-
-                {/* Matrix Table */}
-                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200">
-                        <th className="py-2.5 px-3 text-center w-10 sticky left-0 bg-slate-100 z-10">#</th>
-                        <th className="py-2.5 px-4 min-w-[190px] sticky left-10 bg-slate-100 z-10 border-r border-slate-200">
-                          Student Name & ID
-                        </th>
-                        {attendanceDates.map((dateStr, idx) => {
-                          const isToday = idx === attendanceDates.length - 1;
-                          const fmt = formatMatrixDate(dateStr);
-                          return (
-                            <th
-                              key={dateStr}
-                              className={`py-2 px-1 text-center min-w-[50px] border-r border-slate-200 ${
-                                isToday ? 'bg-emerald-100/80 text-emerald-950 font-black' : ''
-                              }`}
-                            >
-                              <div className="text-[10px] uppercase font-bold text-slate-500">{fmt.weekday}</div>
-                              <div className="font-mono text-xs font-black">{fmt.day}</div>
-                              <div className="text-[9px] text-slate-400">{fmt.month}</div>
-                              {isToday && (
-                                <span className="text-[8px] bg-emerald-700 text-white px-1 rounded-sm uppercase tracking-wider block font-bold">
-                                  Today
-                                </span>
-                              )}
-                            </th>
-                          );
-                        })}
-                        <th className="py-2.5 px-3 text-center w-16 bg-slate-50 border-r border-slate-200">Present</th>
-                        <th className="py-2.5 px-3 text-center w-16 bg-slate-50 border-r border-slate-200">Absent</th>
-                        <th className="py-2.5 px-3 text-center w-20 bg-emerald-50/50 text-emerald-900">Rate %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-900 bg-white">
-                      {filteredStudents.length === 0 ? (
-                        <tr>
-                          <td colSpan={5 + attendanceDates.length} className="py-8 text-center text-slate-500">
-                            No students enrolled in Section {selectedSection}.
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredStudents.map((student, idx) => {
-                          const studentRecords = attendanceMatrix[student.id] || {};
-                          let presentCount = 0;
-                          let absentCount = 0;
-                          let lateCount = 0;
-
-                          attendanceDates.forEach((d) => {
-                            const st = studentRecords[d] || 'Present';
-                            if (st === 'Present') presentCount++;
-                            else if (st === 'Absent') absentCount++;
-                            else if (st === 'Late') lateCount++;
-                          });
-
-                          const totalDays = attendanceDates.length || 1;
-                          const ratePct = Math.round(((presentCount + lateCount * 0.5) / totalDays) * 100);
-
-                          return (
-                            <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                              <td className="py-2 px-2 text-center text-slate-400 font-mono sticky left-0 bg-white">
-                                {idx + 1}
-                              </td>
-                              <td className="py-2 px-3 sticky left-10 bg-white border-r border-slate-200">
-                                <div className="font-bold text-slate-900 text-xs truncate max-w-[170px]">
-                                  {student.fullName}
-                                </div>
-                                <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
-                                  <span>{student.studentId}</span>
-                                  {student.cteSpecialization && (
-                                    <span className="text-[9px] font-bold text-violet-700 bg-violet-50 px-1.5 rounded border border-violet-200">
-                                      {student.cteSpecialization.split(' ')[0]}
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-
-                              {attendanceDates.map((dateStr, dIdx) => {
-                                const isToday = dIdx === attendanceDates.length - 1;
-                                const status = studentRecords[dateStr] || 'Present';
-                                return (
-                                  <td
-                                    key={dateStr}
-                                    className={`py-1.5 px-1 text-center border-r border-slate-100 ${
-                                      isToday ? 'bg-emerald-50/30' : ''
-                                    }`}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => handleMatrixCellClick(student.id, dateStr)}
-                                      className={`w-7 h-7 rounded-lg font-black text-xs transition-transform cursor-pointer hover:scale-110 shadow-2xs flex items-center justify-center mx-auto ${
-                                        status === 'Present'
-                                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200'
-                                          : status === 'Absent'
-                                          ? 'bg-rose-100 text-rose-900 border border-rose-300 hover:bg-rose-200'
-                                          : status === 'Late'
-                                          ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
-                                          : 'bg-blue-100 text-blue-900 border border-blue-300 hover:bg-blue-200'
-                                      }`}
-                                      title={`${formatMatrixDate(dateStr).full}: ${status} (Click to change)`}
-                                    >
-                                      {status === 'Present'
-                                        ? 'P'
-                                        : status === 'Absent'
-                                        ? 'A'
-                                        : status === 'Late'
-                                        ? 'L'
-                                        : 'E'}
-                                    </button>
-                                  </td>
-                                );
-                              })}
-
-                              <td className="py-2 px-2 text-center font-mono font-bold text-emerald-700 bg-slate-50/50 border-r border-slate-200">
-                                {presentCount}
-                              </td>
-                              <td className="py-2 px-2 text-center font-mono font-bold text-rose-600 bg-slate-50/50 border-r border-slate-200">
-                                {absentCount}
-                              </td>
-                              <td className="py-2 px-2 text-center font-mono font-bold text-slate-900 bg-emerald-50/30">
-                                {ratePct}%
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              /* Single-Day Roll Call Table */
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                    <th className="py-3 px-3 text-center">#</th>
-                    <th className="py-3 px-4">Student ID & Name</th>
-                    <th className="py-3 px-4">Current Status</th>
-                    <th className="py-3 px-4 text-right">Update Today&apos;s Status</th>
+                        <span className={`text-[10px] block font-mono ${col.isBonus ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>
+                          out of {col.maxScore}{col.isBonus ? ' · bonus' : ''}
+                        </span>
+                      </th>
+                    ))}
+                    <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center min-w-[104px] font-semibold">Total</th>
+                    <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 py-3 px-3 text-center w-20 font-semibold">Grade</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-900">
-                  {filteredStudents.map((student, idx) => {
-                    const currentStatus = student.attendanceStatus || 'Present';
-                    return (
-                      <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900">{student.fullName}</div>
-                          <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
-                            <span>{student.studentId}</span>
-                            {student.cteSpecialization && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
-                                🛠️ {student.cteSpecialization}
+                <tbody className="text-slate-900">
+                  {filteredStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={4 + assessmentColumns.length} className="py-14 text-center text-slate-500">
+                        <Users className="w-6 h-6 mx-auto mb-2 text-slate-300" />
+                        No students found in Section {selectedSection}.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStudents.map((student, idx) => {
+                      const summary = sums[idx];
+                      const failing = summary.totalEarned > 0 && summary.percentage < 50;
+                      return (
+                        <tr key={student.id} className="group">
+                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="sticky left-12 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2.5 px-4">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {failing && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="Below 50%" />}
+                              <span className="font-semibold text-slate-900">{student.fullName}</span>
+                              {student.cteSpecialization && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">{student.cteSpecialization}</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-mono">
+                              {student.studentId}{student.fullNameAmharic && <span className="text-slate-400 font-sans"> · {student.fullNameAmharic}</span>}
+                            </div>
+                          </td>
+
+                          {assessmentColumns.map((col, cIdx) => (
+                            <td key={col.id} className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-2 text-center">
+                              <ScoreCell
+                                value={getStudentColumnScore(student, col.id)}
+                                max={col.maxScore}
+                                isBonus={col.isBonus}
+                                row={idx}
+                                col={cIdx}
+                                label={`${student.fullName}, ${col.name}, out of ${col.maxScore}`}
+                                onCommit={(n) => handleCustomScoreChange(student.id, col.id, n)}
+                              />
+                            </td>
+                          ))}
+
+                          <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-mono font-bold tabular-nums">
+                                {summary.totalEarned}
+                                <span className="text-slate-400 font-normal">/{summary.maxPossible}</span>
                               </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                              currentStatus === 'Present'
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : currentStatus === 'Absent'
-                                ? 'bg-rose-50 text-rose-800 border border-rose-200'
-                                : currentStatus === 'Late'
-                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                : 'bg-blue-50 text-blue-800 border border-blue-200'
-                            }`}
-                          >
-                            {currentStatus}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5">
-                            {(['Present', 'Absent', 'Late', 'Permission'] as const).map((status) => (
-                              <button
-                                key={status}
-                                onClick={() => handleAttendanceChange(student.id, status)}
-                                className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer transition-colors ${
-                                  currentStatus === status
-                                    ? 'bg-slate-900 text-white'
-                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                }`}
-                              >
-                                {status}
-                              </button>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                              <span className="h-1 w-16 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true">
+                                <span className={`block h-full rounded-full ${bar(summary.percentage)}`} style={{ width: `${Math.min(100, summary.percentage)}%` }} />
+                              </span>
+                            </div>
+                          </td>
+                          <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3 text-center">
+                            <span className={`inline-block min-w-9 px-2.5 py-1 rounded-lg font-mono font-bold text-[11px] ${summary.totalEarned > 0 ? tone(summary.percentage) : 'bg-slate-100 text-slate-400'}`}>
+                              {summary.totalEarned > 0 ? summary.letter.letter : '–'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
-            )}
+            </div>
           </div>
+          );
+        })()}
+
+        {/* TAB 2: ATTENDANCE */}
+        {activeTab === 'attendance' && selectedSection && (
+          <AttendanceTab students={filteredStudents} section={selectedSection} att={att} />
         )}
 
         {/* TAB 3: CLASS ROSTER & PARENT CONTACTS */}
@@ -2143,16 +1732,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       <span className="text-slate-500">Conduct Rating:</span>
                       <span className="font-bold text-emerald-700">{student.conduct || 'A'}</span>
                     </div>
+                    {student.guardianPhone && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Parent Phone:</span>
                       <a
-                        href="tel:+251911234567"
+                        href={`tel:${student.guardianPhone.replace(/\s+/g, '')}`}
                         className="font-mono font-medium text-blue-700 hover:underline flex items-center gap-1"
                       >
                         <Phone className="w-3 h-3" />
-                        <span>+251 91 123 4567</span>
+                        <span>{student.guardianPhone}</span>
                       </a>
                     </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2339,3 +1930,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     </div>
   );
 };
+
+/**
+ * The inner component returns early when nobody is signed in but declares hooks after that point.
+ * Remounting when the signed-in state flips keeps the hook order stable (otherwise React can crash
+ * with "rendered more/fewer hooks" on sign-in or sign-out).
+ */
+export const TeacherPortal: React.FC<TeacherPortalProps> = (props) => (
+  <TeacherPortalInner key={props.activeTeacherUser ? 'signed-in' : 'signed-out'} {...props} />
+);

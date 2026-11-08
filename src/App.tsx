@@ -373,8 +373,12 @@ export default function App() {
     setStudents((prev) => {
       const next = typeof updatedStudents === 'function' ? updatedStudents(prev) : updatedStudents;
       if (isSupabaseConfigured()) {
-        next.slice(0, 25).forEach((st) => {
-          syncActiveStudentToCloud(st).catch(() => {});
+        // Sync only students whose record actually changed (unchanged ones keep the same object reference)
+        const prevById = new Map(prev.map((st) => [st.id, st]));
+        next.forEach((st) => {
+          if (prevById.get(st.id) !== st) {
+            syncActiveStudentToCloud(st).catch(() => {});
+          }
         });
       }
       return next;
@@ -535,6 +539,8 @@ export default function App() {
             lang={lang}
             announcements={announcements}
             events={events}
+            studentCount={students.length}
+            teacherCount={teachers.length}
             onQuickStudentLookup={(query) => {
               setPortalSearchQuery(query);
               setCurrentTab('portal');

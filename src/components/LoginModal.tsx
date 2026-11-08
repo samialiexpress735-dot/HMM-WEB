@@ -78,7 +78,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
       <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
-        <div className="moe-gradient-bar" />
+        <div className="academic-ribbon" />
 
         {/* Header */}
         <div className="p-6 bg-slate-900 text-white flex items-center justify-between">

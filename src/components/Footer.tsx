@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Shield, MapPin, Phone, Mail, Award, ExternalLink, Globe, Cloud } from 'lucide-react';
 import { CloudDeployModal } from './CloudDeployModal';
 
+import { SCHOOL_INFO } from '../data/schoolInfo';
+
 interface FooterProps {
   onNavigate: (tab: string) => void;
   lang: 'en' | 'am';
@@ -10,7 +12,7 @@ interface FooterProps {
 export const Footer: React.FC<FooterProps> = ({ onNavigate, lang }) => {
   const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
   return (
-    <footer className="bg-[#0a1120] text-slate-400 text-xs border-t border-slate-800 mt-16 print:hidden">
+    <footer className="bg-[#070b16] text-slate-400 text-xs border-t border-slate-800 mt-16 print:hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Col 1: Identity & Motto */}
@@ -136,16 +138,20 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, lang }) => {
             <div className="space-y-2 text-[11px]">
               <div className="flex items-start gap-2">
                 <MapPin className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Next to DBCTE & DBU Health Campus, Debre Berhan, Amhara, Ethiopia</span>
+                <span>{SCHOOL_INFO.address || 'Debre Berhan, Ethiopia'}</span>
               </div>
+              {SCHOOL_INFO.phone && (
               <div className="flex items-center gap-2">
                 <Phone className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                <span>+251 11 681 2045</span>
+                <span>{SCHOOL_INFO.phone}</span>
               </div>
+              )}
+              {SCHOOL_INFO.email && (
               <div className="flex items-center gap-2">
                 <Mail className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                <span>registrar@hailemariammamo.edu.et</span>
+                <span>{SCHOOL_INFO.email}</span>
               </div>
+              )}
             </div>
           </div>
         </div>
@@ -153,9 +159,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, lang }) => {
         <div className="mt-12 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
           <p>© {new Date().getFullYear()} Hailemariam Mamo Secondary & Preparatory School. All Rights Reserved.</p>
           <div className="flex flex-wrap items-center gap-3">
-            <span className="px-3 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-800 text-[10px] font-mono">
-              MoE Center DB-HMM-0912
-            </span>
             <p className="flex items-center gap-1.5 text-slate-400">
               <Shield className="w-3.5 h-3.5 text-emerald-500" />
               <span>Official Student Information System · Debre Berhan, Ethiopia</span>

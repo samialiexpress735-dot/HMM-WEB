@@ -140,7 +140,7 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
       {/* Main Container */}
       <div className="max-w-md w-full mx-auto bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
         {/* Card Header in Deep Academic Midnight */}
-        <div className="p-6 sm:p-8 bg-[#0a1120] border-b border-slate-800 text-center relative text-white">
+        <div className="p-6 sm:p-8 bg-[#070b16] border-b border-slate-800 text-center relative text-white">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-600 to-slate-900 border border-emerald-400/30 shadow-md mb-3">
             <div className="text-center font-bold tracking-tight text-amber-300">
               <span className="text-lg block leading-none">HMM</span>
@@ -149,7 +149,7 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
           </div>
 
           <div className="text-xs text-emerald-400 font-medium mb-1">
-            Debre Berhan, Ethiopia · Altitude 2,840m
+            Debre Berhan, Ethiopia
           </div>
 
           <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
@@ -265,7 +265,7 @@ export const AdminSignupPage: React.FC<AdminSignupPageProps> = ({
 
 
       {/* Footer attribution */}
-      <div className="max-w-4xl mx-auto text-center mt-6 text-xs text-[#786154]">
+      <div className="max-w-4xl mx-auto text-center mt-6 text-xs text-[#5f7090]">
         <p>Hailemariam Mamo Secondary & Preparatory School • Established 1958 E.C. (1965 G.C.) • Debre Berhan, Ethiopia</p>
       </div>
     </div>

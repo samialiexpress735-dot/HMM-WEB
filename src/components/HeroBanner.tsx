@@ -17,6 +17,8 @@ import {
   Search
 } from 'lucide-react';
 import { SchoolAnnouncement, SchoolEvent } from '../data/schoolData';
+import { isSupabaseConfigured } from '../lib/supabase';
+import heroImg from '../assets/images/hero_school_campus_1793721839286.jpg';
 
 interface HeroBannerProps {
   onNavigate: (tab: string) => void;
@@ -24,6 +26,8 @@ interface HeroBannerProps {
   announcements?: SchoolAnnouncement[];
   events?: SchoolEvent[];
   onQuickStudentLookup?: (query: string) => void;
+  studentCount?: number;
+  teacherCount?: number;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({
@@ -31,7 +35,9 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   lang,
   announcements = [],
   events = [],
-  onQuickStudentLookup
+  onQuickStudentLookup,
+  studentCount = 0,
+  teacherCount = 0
 }) => {
   const [activeSpotlightTab, setActiveSpotlightTab] = useState<'heritage' | 'labs' | 'library' | 'notices'>('heritage');
   const [lookupQuery, setLookupQuery] = useState('');
@@ -48,104 +54,76 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
   return (
     <div className="space-y-12">
-      {/* 1. CINEMATIC ACADEMIC HERO SHOWCASE */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-800 shadow-2xl min-h-[460px] flex flex-col justify-end">
-        {/* Real Campus Photography Backdrop */}
-        <img
-          src="/src/assets/images/hero_school_campus_1793721839286.jpg"
-          alt="Hailemariam Mamo Secondary & Prep School Campus in Debre Berhan"
-          className="absolute inset-0 w-full h-full object-cover object-center"
-          referrerPolicy="no-referrer"
-        />
+      {/* 1. HERO: school identity on the left, live grade-lookup console on the right */}
+      <section className="relative overflow-hidden rounded-3xl bg-slate-950 text-white">
+        <img src={heroImg} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity" />
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-950/90 to-emerald-950/60" />
+        <div className="absolute inset-0 grid-backdrop" aria-hidden="true" />
 
-        {/* Measured High-Contrast Scrim Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-slate-900/30" />
-
-        {/* Hero Content */}
-        <div className="relative z-10 px-6 py-10 md:px-12 md:py-14 max-w-4xl space-y-4">
-          {/* Clean Unboxed Metadata */}
-          <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-emerald-300">
-            <span className="flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-amber-400" />
-              <span>Debre Berhan, Ethiopia</span>
-            </span>
-            <span aria-hidden="true" className="text-slate-500">·</span>
-            <span>Altitude 2,840m</span>
-            <span aria-hidden="true" className="text-slate-500">·</span>
-            <span>Est. 1958 E.C. (1965 G.C.)</span>
-            <span aria-hidden="true" className="text-slate-500">·</span>
-            <span className="text-amber-300 font-semibold">MoE Center of Excellence</span>
-          </div>
-
-          {/* Institutional Headline */}
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight" style={{ textWrap: 'balance' }}>
-            {lang === 'am' ? (
-              <>
-                ደብረ ብርሃን ኃይለማሪያም ማሞ <br />
-                <span className="text-amber-300">
-                  አጠቃላይ ሁለተኛ እና መሰናዶ ትምህርት ቤት
-                </span>
-              </>
-            ) : (
-              <>
-                Hailemariam Mamo <br />
-                <span className="text-amber-300">
-                  Secondary & Preparatory School
-                </span>
-              </>
-            )}
-          </h1>
-
-          <p className="text-sm md:text-base text-slate-200 max-w-2xl leading-relaxed">
-            {lang === 'am'
-              ? 'በሰሜን ሸዋ ዞን ደብረ ብርሃን ከተማ የሚገኝ ታሪካዊ ሁለተኛና መሰናዶ ትምህርት ቤት። ለተማሪዎች፣ ወላጆች እና መምህራን የተዘጋጀ የተቀናጀ የውጤት፣ የምዝገባ እና የትምህርት መረጃ መረብ።'
-              : 'A landmark secondary and preparatory institution in Debre Berhan, North Shewa. Comprehensive academic portal for continuous assessment, transparent student grades, registrar intake, and faculty administration.'}
-          </p>
-
-          {/* Quick Result Slip / Student ID Lookup Box */}
-          <form onSubmit={handleLookupSubmit} className="pt-2 max-w-xl">
-            <div className="flex flex-col sm:flex-row items-stretch gap-2 bg-slate-900/90 p-1.5 rounded-xl border border-slate-700/80 backdrop-blur-md">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder={lang === 'am' ? 'የተማሪ መለያ ቁጥር (ምሳሌ፡ DB-HMM-09-001) ወይም ስም...' : 'Enter Student ID (e.g. DB-HMM-09-001) or Name...'}
-                  value={lookupQuery}
-                  onChange={(e) => setLookupQuery(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
-              >
-                <span>{lang === 'am' ? 'ውጤት ፈልግ' : 'Check Grade Slip'}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+        <div className="relative z-10 grid lg:grid-cols-[1.15fr_1fr] gap-10 items-center px-6 py-12 sm:px-12 sm:py-16 lg:py-20">
+          <div className="hero-in space-y-6 max-w-2xl">
+            <p className="text-sm text-amber-300 font-semibold flex items-center gap-2">
+              <MapPin className="w-4 h-4" />
+              {lang === 'am' ? 'ደብረ ብርሃን፣ ሰሜን ሸዋ' : 'Debre Berhan, North Shewa'}
+            </p>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.05]" style={{ textWrap: 'balance' }}>
+              {lang === 'am' ? 'ኃይለማሪያም ማሞ ሁለተኛና መሰናዶ ትምህርት ቤት' : 'Hailemariam Mamo Secondary & Preparatory School'}
+            </h1>
+            <p className="text-base text-slate-300 leading-relaxed max-w-xl">
+              {lang === 'am'
+                ? 'ውጤት፣ ምዝገባ እና የትምህርት መርሃ ግብር በአንድ ቦታ። ከስልክም ከኮምፒውተርም ተመሳሳይ መረጃ ያያሉ።'
+                : 'Grades, registration and class schedules in one place. Open it on your phone or a computer and see the same up-to-date records.'}
+            </p>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <button onClick={() => onNavigate('portal')} className="btn-academic px-5 py-3 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 text-sm font-bold cursor-pointer">
+                {lang === 'am' ? 'ውጤት ይመልከቱ' : 'View grades'}
+              </button>
+              <button onClick={() => onNavigate('about')} className="btn-academic px-5 py-3 rounded-full bg-white/10 hover:bg-white/15 text-white text-sm font-semibold cursor-pointer">
+                {lang === 'am' ? 'ስለ ት/ቤቱ' : 'About the school'}
               </button>
             </div>
-          </form>
-
-          {/* 4-Metric Strip with Tabular Numerals */}
-          <div className="pt-6 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <div className="text-2xl font-bold text-white font-mono tabular-nums">2,450+</div>
-              <div className="text-xs text-slate-300 font-medium">Enrolled Students</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-emerald-400 font-mono tabular-nums">85+</div>
-              <div className="text-xs text-slate-300 font-medium">Certified Faculty</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-white font-mono tabular-nums">Grades 9-12</div>
-              <div className="text-xs text-slate-300 font-medium">General & Prep Streams</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-amber-400 font-mono tabular-nums">60 Years</div>
-              <div className="text-xs text-slate-300 font-medium">Academic Legacy</div>
-            </div>
           </div>
+
+          {/* Console: the one memorable element */}
+          <form onSubmit={handleLookupSubmit} className="glass rounded-2xl p-5 sm:p-6 space-y-5 shadow-[0_30px_80px_-30px_rgba(0,0,0,.8)]">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-lg font-semibold">{lang === 'am' ? 'የተማሪ ውጤት ፈልግ' : 'Find a student’s grades'}</h2>
+              <span className="flex items-center gap-2 text-xs text-slate-300" title={isSupabaseConfigured() ? 'Connected to the school database' : 'Offline: showing data saved on this device'}>
+                <span className="sync-dot" data-off={!isSupabaseConfigured()} />
+                {isSupabaseConfigured() ? (lang === 'am' ? 'በቀጥታ የተመሳሰለ' : 'Live sync') : (lang === 'am' ? 'ከመስመር ውጭ' : 'Offline')}
+              </span>
+            </div>
+            <label className="block">
+              <span className="text-xs text-slate-400">{lang === 'am' ? 'የተማሪ መለያ ቁጥር ወይም ስም' : 'Student ID or name'}</span>
+              <div className="relative mt-1.5">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text" value={lookupQuery} onChange={(e) => setLookupQuery(e.target.value)}
+                  placeholder="DB-HMM-09-001"
+                  className="w-full pl-10 pr-3 py-3 rounded-xl bg-slate-950/70 border border-white/10 text-sm text-white placeholder-slate-500 font-mono focus:border-amber-400 focus:outline-none"
+                />
+              </div>
+            </label>
+            <button type="submit" className="btn-academic w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-bold cursor-pointer flex items-center justify-center gap-2">
+              {lang === 'am' ? 'ውጤት አሳይ' : 'Show grade report'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            {(studentCount > 0 || teacherCount > 0) && (
+            <dl className="grid grid-cols-2 gap-3 pt-4 border-t border-white/10 text-center">
+              {[
+                [lang === 'am' ? 'ተማሪዎች' : 'Students', studentCount],
+                [lang === 'am' ? 'መምህራን' : 'Teachers', teacherCount],
+              ].filter(([, v]) => Number(v) > 0).map(([k, v]) => (
+                <div key={k}>
+                  <dd className="font-mono text-xl font-semibold text-white tabular-nums">{Number(v).toLocaleString()}</dd>
+                  <dt className="text-[11px] text-slate-400 mt-0.5">{k}</dt>
+                </div>
+              ))}
+            </dl>
+            )}
+          </form>
         </div>
-      </div>
+      </section>
 
       {/* 2. THREE CORE DIGITAL GATEWAYS */}
       <div className="space-y-4">

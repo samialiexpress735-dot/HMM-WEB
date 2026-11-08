@@ -798,3 +798,97 @@ export function subscribeToAllSchoolDataRealtime(onSyncRequired: () => void): ()
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Attendance (table: attendance_records, see supabase/add_attendance.sql)
+// ---------------------------------------------------------------------------
+export type AttendanceStatus = 'Present' | 'Absent' | 'Late' | 'Permission';
+
+export interface AttendanceRecord {
+  studentId: string;
+  date: string; // YYYY-MM-DD (school-local date)
+  section: string;
+  status: AttendanceStatus;
+  note?: string;
+  recordedBy?: string;
+}
+
+/** Loads one section's attendance from `fromDate` onward. Returns null if the cloud is unreachable. */
+export async function fetchAttendanceFromCloud(section: string, fromDate: string): Promise<AttendanceRecord[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const out: AttendanceRecord[] = [];
+    const PAGE = 1000; // Supabase returns at most 1000 rows per request, so page through
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await client
+        .from('attendance_records')
+        .select('student_id, attendance_date, section, status, note, recorded_by')
+        .eq('section', section)
+        .gte('attendance_date', fromDate)
+        .order('attendance_date', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.warn('Attendance fetch failed (has add_attendance.sql been run?):', error.message);
+        return null;
+      }
+      (data || []).forEach((r: any) =>
+        out.push({
+          studentId: r.student_id,
+          date: r.attendance_date,
+          section: r.section,
+          status: r.status,
+          note: r.note || undefined,
+          recordedBy: r.recorded_by || undefined
+        })
+      );
+      if (!data || data.length < PAGE) break;
+    }
+    return out;
+  } catch (err) {
+    console.warn('Attendance fetch error:', err);
+    return null;
+  }
+}
+
+/** Saves records (insert or update by student + date). Returns true only if the cloud accepted them. */
+export async function syncAttendanceToCloud(records: AttendanceRecord[]): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  if (records.length === 0) return true;
+  try {
+    const rows = records.map((r) => ({
+      student_id: r.studentId,
+      attendance_date: r.date,
+      section: r.section,
+      status: r.status,
+      note: r.note || null,
+      recorded_by: r.recordedBy || null
+    }));
+    const { error } = await client.from('attendance_records').upsert(rows, { onConflict: 'student_id,attendance_date' });
+    if (error) {
+      console.warn('Attendance save failed:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Attendance save error:', err);
+    return false;
+  }
+}
+
+export function subscribeToAttendanceRealtime(section: string, onChange: () => void): () => void {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+  try {
+    const channel = client
+      .channel(`realtime:attendance:${section}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records', filter: `section=eq.${section}` }, () => onChange())
+      .subscribe();
+    return () => {
+      client.removeChannel(channel);
+    };
+  } catch {
+    return () => {};
+  }
+}

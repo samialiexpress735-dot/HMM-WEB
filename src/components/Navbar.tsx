@@ -71,171 +71,114 @@ export const Navbar: React.FC<NavbarProps> = ({
     setMobileMenuOpen(false);
   };
 
+  const isAm = lang === 'am';
+  const navBtn = (active: boolean) =>
+    `flex items-center gap-2 px-3.5 py-2 rounded-full text-[13px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+      active ? 'bg-white/10 text-amber-300' : 'text-slate-300 hover:text-white hover:bg-white/5'
+    }`;
+
   return (
-    <header className="sticky top-0 z-50 bg-[#0a1120]/95 backdrop-blur-md border-b border-slate-800 text-slate-100 transition-all shadow-md w-full">
-      {/* Subtle Ethiopian Academic Ribbon (Emerald to Gold) */}
-      <div className="academic-ribbon" />
-
-      {/* Top Bar Contract: 3-Zone Architecture */}
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-4 lg:gap-8">
-          
-          {/* ZONE 1: BRAND WORDMARK (Single text element with emblem) */}
-          <div
+    <header className="sticky top-0 z-50 w-full px-3 sm:px-6 pt-3">
+      <div className="glass max-w-7xl mx-auto rounded-2xl shadow-[0_10px_40px_-10px_rgba(0,0,0,.5)] overflow-hidden text-slate-100">
+        <div className="academic-ribbon" />
+        <div className="flex items-center justify-between h-14 px-3 sm:px-4 gap-3">
+          <button
             onClick={() => handleNavClick(portalMode === 'admin' ? 'admin' : 'home')}
-            className="flex items-center gap-3 cursor-pointer group shrink-0"
+            className="flex items-center gap-3 shrink-0 cursor-pointer text-left"
+            aria-label="Hailemariam Mamo home"
           >
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-600 via-emerald-700 to-slate-900 flex items-center justify-center border border-emerald-400/40 shadow-sm transition-transform group-hover:scale-105">
-              <span className="font-bold text-xs tracking-wider text-amber-300">HMM</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold tracking-tight text-white group-hover:text-amber-300 transition-colors whitespace-nowrap">
-                {lang === 'am' ? 'ኃይለማሪያም ማሞ ሁለተኛና መሰናዶ' : 'Hailemariam Mamo Secondary & Prep'}
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-800 grid place-items-center font-display font-extrabold text-[11px] text-amber-200 ring-1 ring-white/15">
+              HMM
+            </span>
+            <span className="leading-tight">
+              <span className="block font-display text-[13px] font-semibold text-white whitespace-nowrap">
+                {isAm ? 'ኃይለማሪያም ማሞ ት/ቤት' : 'Hailemariam Mamo School'}
               </span>
-              <span className="text-[11px] text-slate-400 hidden sm:inline whitespace-nowrap">
-                {lang === 'am' ? 'ደብረ ብርሃን • ኢትዮጵያ' : 'Debre Berhan, Ethiopia · Est. 1958 E.C.'}
+              <span className="hidden sm:block text-[11px] text-slate-400 whitespace-nowrap">
+                {isAm ? 'ደብረ ብርሃን፣ ኢትዮጵያ' : 'Debre Berhan, Ethiopia'}
               </span>
-            </div>
-          </div>
+            </span>
+          </button>
 
-          {/* ZONE 2: 4-5 CONCISE SINGLE-LINE NAV LINKS */}
-          <nav className="hidden md:flex items-center gap-1 lg:gap-2 shrink-0" aria-label="Main Navigation">
+          <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
             {currentNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = currentTab === item.id;
+              const active = currentTab === item.id;
               return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavClick(item.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                    isActive
-                      ? 'bg-slate-800 text-emerald-400 shadow-sm border border-slate-700'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span>{lang === 'am' ? item.labelAm : item.labelEn}</span>
+                <button key={item.id} onClick={() => handleNavClick(item.id)} className={navBtn(active)} aria-current={active ? 'page' : undefined}>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{isAm ? item.labelAm : item.labelEn}</span>
                 </button>
               );
             })}
           </nav>
 
-          {/* ZONE 3: ACTIONS (Language Switch, Portal Switch & Session) */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            {/* Language Switcher */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setLang(lang === 'en' ? 'am' : 'en')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors cursor-pointer whitespace-nowrap"
-              title={lang === 'en' ? 'Switch to Amharic' : 'Switch to English'}
-              aria-label="Toggle language"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-slate-200 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+              aria-label={lang === 'en' ? 'Switch to Amharic' : 'Switch to English'}
             >
-              <Globe className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-[11px]">{lang === 'en' ? 'አማርኛ' : 'EN'}</span>
+              <Globe className="w-3.5 h-3.5 text-amber-300" />
+              {lang === 'en' ? 'አማርኛ' : 'English'}
             </button>
 
-            {/* Portal Switcher Button */}
             {onTogglePortalMode && (
               <button
                 onClick={onTogglePortalMode}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm cursor-pointer whitespace-nowrap"
-                title={portalMode === 'public' ? 'Switch to Administrative Suite' : 'Switch to Student Portal'}
+                className="hidden sm:flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 transition-colors cursor-pointer whitespace-nowrap"
               >
-                {portalMode === 'public' ? (
-                  <>
-                    <Lock className="w-3.5 h-3.5 text-amber-200" />
-                    <span>Admin Suite</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Student Portal</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </>
-                )}
+                {portalMode === 'public' ? (<><Lock className="w-3.5 h-3.5" />{isAm ? 'የአስተዳደር መግቢያ' : 'Staff sign in'}</>) : (<>{isAm ? 'ወደ ት/ቤቱ ገጽ' : 'Back to school site'}<ArrowRight className="w-3.5 h-3.5" /></>)}
               </button>
             )}
 
-            {/* Admin User Session Pill */}
             {adminUser && (
-              <div className="hidden lg:flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="font-semibold text-slate-200 truncate max-w-[100px]">
-                  {adminUser.fullName.split(' ')[0]}
-                </span>
-                <button
-                  onClick={onSignOut}
-                  title="Sign out"
-                  className="text-slate-400 hover:text-white ml-1 p-0.5 rounded cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
+              <div className="hidden lg:flex items-center gap-1.5 bg-white/5 px-3 py-2 rounded-full text-xs">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                <span className="font-semibold truncate max-w-[90px]">{adminUser.fullName.split(' ')[0]}</span>
+                <button onClick={onSignOut} title="Sign out" aria-label="Sign out" className="text-slate-400 hover:text-white cursor-pointer"><LogOut className="w-3.5 h-3.5" /></button>
               </div>
             )}
-
-            {/* Teacher User Session Pill */}
             {teacherUser && (
-              <div className="hidden lg:flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs">
+              <div className="hidden lg:flex items-center gap-1.5 bg-white/5 px-3 py-2 rounded-full text-xs">
                 <FileSpreadsheet className="w-3.5 h-3.5 text-amber-300" />
-                <span className="font-semibold text-slate-200 truncate max-w-[100px]">
-                  {teacherUser.name.split(' ')[0]}
-                </span>
+                <span className="font-semibold truncate max-w-[90px]">{teacherUser.name.split(' ')[0]}</span>
                 {onSignOutTeacher && (
-                  <button
-                    onClick={onSignOutTeacher}
-                    title="Sign out of Teacher Suite"
-                    className="text-slate-400 hover:text-white ml-1 p-0.5 rounded cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                  </button>
+                  <button onClick={onSignOutTeacher} title="Sign out" aria-label="Sign out of teacher desk" className="text-slate-400 hover:text-white cursor-pointer"><LogOut className="w-3.5 h-3.5" /></button>
                 )}
               </div>
             )}
 
-            {/* Mobile Menu Toggle */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 focus:outline-none"
-              aria-label="Toggle navigation menu"
+              className="md:hidden p-2 rounded-full text-slate-200 hover:bg-white/10"
+              aria-label="Toggle navigation menu" aria-expanded={mobileMenuOpen}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
-        {/* Mobile Navigation Dropdown */}
         {mobileMenuOpen && (
-          <div className="md:hidden py-3 border-t border-slate-800 space-y-1 animate-in fade-in">
+          <div className="md:hidden px-3 pb-3 pt-1 border-t border-white/10 space-y-1">
             {currentNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = currentTab === item.id;
+              const active = currentTab === item.id;
               return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavClick(item.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors text-left ${
-                    isActive
-                      ? 'bg-slate-800 text-emerald-400 border border-slate-700'
-                      : 'text-slate-300 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span>{lang === 'am' ? item.labelAm : item.labelEn}</span>
+                <button key={item.id} onClick={() => handleNavClick(item.id)} className={`${navBtn(active)} w-full rounded-xl`}>
+                  <Icon className="w-4 h-4" />
+                  <span>{isAm ? item.labelAm : item.labelEn}</span>
                 </button>
               );
             })}
-
             {onTogglePortalMode && (
-              <div className="pt-2 border-t border-slate-800">
-                <button
-                  onClick={() => {
-                    onTogglePortalMode();
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-700 text-white"
-                >
-                  <span>{portalMode === 'public' ? 'Open Admin Suite' : 'Open Student Portal'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <button
+                onClick={() => { onTogglePortalMode(); setMobileMenuOpen(false); }}
+                className="w-full flex items-center justify-between px-4 py-2.5 mt-1 rounded-xl text-xs font-bold bg-amber-400 text-slate-950"
+              >
+                <span>{portalMode === 'public' ? (isAm ? 'የአስተዳደር መግቢያ' : 'Staff sign in') : (isAm ? 'ወደ ት/ቤቱ ገጽ' : 'Back to school site')}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
         )}

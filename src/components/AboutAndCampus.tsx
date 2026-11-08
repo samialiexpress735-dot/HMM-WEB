@@ -16,6 +16,8 @@ import {
   Sparkles
 } from 'lucide-react';
 
+import { SCHOOL_INFO } from '../data/schoolInfo';
+
 interface AboutAndCampusProps {
   lang: 'en' | 'am';
 }
@@ -51,7 +53,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
                 : 'Hailemariam Mamo Secondary & Preparatory School'}
             </h2>
             <p className="text-sm md:text-base text-slate-600 leading-relaxed">
-              Situated in the historic highland city of <strong>Debre Berhan (ደብረ ብርሃን)</strong>, at an altitude of 2,840 meters in the North Shewa Zone of Amhara Region, Ethiopia, our school stands as a beacon of academic excellence, national discipline, and civic leadership.
+              Situated in the historic highland city of <strong>Debre Berhan (ደብረ ብርሃን)</strong>, in the North Shewa Zone of Amhara Region, Ethiopia, our school stands as a beacon of academic excellence, national discipline, and civic leadership.
             </p>
           </div>
           <div className="lg:col-span-5">
@@ -108,7 +110,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
               {lang === 'am' ? 'የትምህርት ቤቱ መገልገያዎችና ግቢ' : 'Debre Berhan Campus Facilities'}
             </h3>
             <p className="text-xs text-slate-500">
-              Modern resources empowering over 2,450 secondary and preparatory students
+              Modern resources for our secondary and preparatory students
             </p>
           </div>
           <span className="text-xs font-semibold px-3 py-1 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 self-start sm:self-auto">
@@ -352,13 +354,6 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
                 Open Mon - Fri
               </span>
             </div>
-            <p className="text-slate-600 text-[11px] leading-relaxed">
-              Located near Debre Berhan College of Teacher Education (DBCTE) and DBU Asrat Health Campus, adjacent to the main Addis-Dessie highway.
-            </p>
-            <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-700 flex items-center justify-between">
-              <span>GPS Coordinates:</span>
-              <span className="font-bold text-slate-900">9°41&apos;N, 39°32&apos;E (Alt: 2,840m)</span>
-            </div>
           </div>
 
           <div className="space-y-3 text-xs text-slate-700">
@@ -366,7 +361,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
               <Phone className="w-4 h-4 text-emerald-700 flex-shrink-0" />
               <div>
                 <span className="font-bold text-slate-900 block">Registrar & Principal Office:</span>
-                <span>+251 11 681 2045 / +251 91 142 8891</span>
+                <span>{SCHOOL_INFO.phone || 'Not published yet'}</span>
               </div>
             </div>
 
@@ -374,7 +369,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
               <Mail className="w-4 h-4 text-emerald-700 flex-shrink-0" />
               <div>
                 <span className="font-bold text-slate-900 block">Official Academic Email:</span>
-                <span className="text-emerald-700 font-medium">info@hailemariammamo.edu.et</span>
+                <span className="text-emerald-700 font-medium">{SCHOOL_INFO.email || 'Not published yet'}</span>
               </div>
             </div>
 
@@ -382,7 +377,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
               <Clock className="w-4 h-4 text-emerald-700 flex-shrink-0" />
               <div>
                 <span className="font-bold text-slate-900 block">Office Hours:</span>
-                <span>Monday - Friday: 8:00 AM - 5:00 PM (EAT)</span>
+                <span>{SCHOOL_INFO.officeHours || 'Not published yet'}</span>
               </div>
             </div>
           </div>
