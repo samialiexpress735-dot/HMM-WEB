@@ -484,12 +484,13 @@ export async function syncSubAdminToCloud(subAdmin: SubAdminRecord): Promise<boo
 // 3. GRADE SECTIONS CLOUD SYNC
 // ==============================================================================
 
-export async function fetchSectionsFromCloud(): Promise<GradeSection[]> {
+/** Returns null when the database cannot be reached, so an outage is never mistaken for "no sections". */
+export async function fetchSectionsFromCloud(): Promise<GradeSection[] | null> {
   const client = getSupabaseClient();
-  if (!client) return [];
+  if (!client) return null;
   try {
     const { data, error } = await client.from('grade_sections').select('*');
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map((s: any): GradeSection => ({
       id: s.id,
       grade: s.grade,
@@ -522,7 +523,7 @@ export async function fetchSectionsFromCloud(): Promise<GradeSection[]> {
       cteSpecialization: s.cte_specialization || undefined
     }));
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -579,12 +580,13 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
 // 4. REGISTRATIONS (2019 E.C.) CLOUD SYNC
 // ==============================================================================
 
-export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent2019[]> {
+/** Returns null when the database cannot be reached. An empty array means it was reached and has no registrations. */
+export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent2019[] | null> {
   const client = getSupabaseClient();
-  if (!client) return [];
+  if (!client) return null;
   try {
     const { data, error } = await client.from('registrations_2019').select('*');
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map((r: any): RegisteredStudent2019 => ({
       id: r.id,
       studentId: r.student_id,
@@ -610,11 +612,49 @@ export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent20
       avatar: ''
     }));
   } catch {
-    return [];
+    return null;
+  }
+}
+
+// A registration is "pending" from the moment it is changed here until the database confirms the save.
+// Only pending registrations may be re-sent when they are missing from the database; any other missing
+// registration was deleted there and has to disappear here too.
+const PENDING_REGISTRATIONS_KEY = 'hmm_pending_registration_ids';
+const latestRegistrationPush = new Map<string, number>();
+let registrationPushSeq = 0;
+
+export function getPendingRegistrationIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PENDING_REGISTRATIONS_KEY);
+    if (raw) return new Set<string>(JSON.parse(raw));
+  } catch {
+    // ignore
+  }
+  return new Set<string>();
+}
+
+function setRegistrationPending(id: string, pending: boolean) {
+  try {
+    const ids = getPendingRegistrationIds();
+    if (pending) ids.add(id);
+    else ids.delete(id);
+    localStorage.setItem(PENDING_REGISTRATIONS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // ignore
   }
 }
 
 export async function syncStudentToCloud(student: RegisteredStudent2019): Promise<boolean> {
+  const ticket = ++registrationPushSeq;
+  latestRegistrationPush.set(student.id, ticket);
+  setRegistrationPending(student.id, true);
+  const ok = await pushRegistrationToCloud(student);
+  // Only the newest save of a student may clear its pending mark.
+  if (ok && latestRegistrationPush.get(student.id) === ticket) setRegistrationPending(student.id, false);
+  return ok;
+}
+
+async function pushRegistrationToCloud(student: RegisteredStudent2019): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
@@ -688,7 +728,8 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
   if (!client) return null;
   try {
     const { data: studentsData, error: sErr } = await client.from('students').select('*').order('student_id');
-    if (sErr || !studentsData || studentsData.length === 0) return null;
+    if (sErr || !studentsData) return null; // unreachable
+    if (studentsData.length === 0) return []; // reachable, and no students
 
     const { data: marksData } = await client.from('student_marks').select('*');
 
@@ -818,26 +859,61 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
  * Universal Real-Time WebSocket Channel
  * Listens to all tables across all school departments and triggers sync callback instantly.
  */
+/** Collapses a burst of events (e.g. 30 students saved at once) into a single call. */
+function debounced(fn: () => void, ms: number): { call: () => void; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    call: () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(fn, ms);
+    },
+    cancel: () => {
+      if (timer) clearTimeout(timer);
+    }
+  };
+}
+
 export function subscribeToAllSchoolDataRealtime(onSyncRequired: () => void): () => void {
   const client = getSupabaseClient();
   if (!client) return () => {};
 
   try {
+    const trigger = debounced(onSyncRequired, 700);
     const channel = client
       .channel('realtime:school-master')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => onSyncRequired())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'grade_sections' }, () => onSyncRequired())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => onSyncRequired())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => onSyncRequired())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_marks' }, () => onSyncRequired())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_slots' }, () => onSyncRequired())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'grade_sections' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_marks' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_slots' }, () => trigger.call())
       .subscribe();
 
     return () => {
+      trigger.cancel();
       client.removeChannel(channel);
     };
   } catch (err) {
     console.warn('Realtime subscription error:', err);
+    return () => {};
+  }
+}
+
+/** Fires when a registration is added, changed or deleted in the database (needs supabase/enable_realtime.sql). */
+export function subscribeToRegistrationsRealtime(onChange: () => void): () => void {
+  const client = getSupabaseClient();
+  if (!client) return () => {};
+  try {
+    const trigger = debounced(onChange, 500);
+    const channel = client
+      .channel('realtime:registrations')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => trigger.call())
+      .subscribe();
+    return () => {
+      trigger.cancel();
+      client.removeChannel(channel);
+    };
+  } catch {
     return () => {};
   }
 }

@@ -209,22 +209,33 @@ export default function App() {
       setCurrentTab(tabParam);
     }
 
-    // Automatic silent background load
+    // Automatic silent background load.
+    // The database is the truth: a list it returns replaces the local copy, so rows deleted in Supabase
+    // disappear here too. Two safeguards keep local work safe:
+    //  - if the database cannot be reached (null), the local copy is left alone;
+    //  - an EMPTY list only clears the local copy if the database has held rows before (i.e. they were
+    //    deleted), never when nothing has been saved to it yet.
+    const applyCloudList = <T,>(name: string, list: T[] | null, apply: (rows: T[]) => void) => {
+      if (list === null) return;
+      const seenKey = `hmm_cloud_has_held_${name}`;
+      try {
+        if (list.length > 0) {
+          localStorage.setItem(seenKey, '1');
+        } else if (localStorage.getItem(seenKey) !== '1') {
+          return;
+        }
+      } catch {
+        if (list.length === 0) return;
+      }
+      apply(list);
+    };
+
     async function loadCloudData() {
       if (isSupabaseConfigured()) {
         try {
-          const cloudTeachers = await fetchTeachersFromCloud();
-          if (cloudTeachers !== null && cloudTeachers.length > 0) {
-            setTeachers(cloudTeachers);
-          }
-          const cloudSections = await fetchSectionsFromCloud();
-          if (cloudSections && cloudSections.length > 0) {
-            setSections(cloudSections);
-          }
-          const cloudStudents = await fetchStudentsFromCloud();
-          if (cloudStudents && cloudStudents.length > 0) {
-            setStudents(cloudStudents);
-          }
+          applyCloudList('teachers', await fetchTeachersFromCloud(), setTeachers);
+          applyCloudList('sections', await fetchSectionsFromCloud(), setSections);
+          applyCloudList('students', await fetchStudentsFromCloud(), setStudents);
         } catch (e) {
           console.warn('Background cloud sync error:', e);
         }

@@ -64,7 +64,15 @@ import {
   CTE_SPECIALIZATION_OPTIONS,
   CTESpecialization
 } from '../data/schoolData';
-import { syncStudentToCloud, syncTimetableSlotToCloud, fetchRegistrationsFromCloud } from '../lib/supabase';
+import {
+  syncStudentToCloud,
+  syncTimetableSlotToCloud,
+  fetchRegistrationsFromCloud,
+  fetchSectionsFromCloud,
+  getPendingRegistrationIds,
+  subscribeToRegistrationsRealtime
+} from '../lib/supabase';
+import { reconcileRegistrations, releaseSeatsOfRemoved } from '../utils/registrationSync';
 import {
   normalizeName,
   studentsToArchive,
@@ -296,29 +304,69 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Load registrations saved from other devices, and send up any that only exist here.
+  // Keep this list in step with the database. Registrations saved on other devices appear here, students
+  // deleted in Supabase disappear (and give their class seat back), and only students whose save has not
+  // gone through yet are sent up again.
+  const registeredRef = React.useRef(registeredStudents);
+  registeredRef.current = registeredStudents;
+  const sectionsRef = React.useRef(sections);
+  sectionsRef.current = sections;
+  const cloudSyncBusy = React.useRef(false);
+  const cloudSyncQueued = React.useRef(false);
+  const cloudSyncRef = React.useRef<() => Promise<void>>(async () => {});
+
+  cloudSyncRef.current = async () => {
+    if (cloudSyncBusy.current) {
+      cloudSyncQueued.current = true;
+      return;
+    }
+    cloudSyncBusy.current = true;
+    try {
+      const rows = await fetchRegistrationsFromCloud();
+      if (rows === null) return; // database unreachable: keep what is on screen
+      const { merged, removed, toUpload } = reconcileRegistrations(registeredRef.current, rows, getPendingRegistrationIds());
+      registeredRef.current = merged;
+      setRegisteredStudents(merged);
+      toUpload.forEach((l) => syncStudentToCloud(l).catch(() => {}));
+
+      if (removed.length > 0) {
+        // Classes keep a saved head count, so give back the seats of the students that are gone.
+        const fresh = await fetchSectionsFromCloud();
+        const base = fresh && fresh.length > 0 ? fresh : sectionsRef.current;
+        releaseSeatsOfRemoved(base, removed).forEach(saveClass);
+        setToast(
+          lang === 'am'
+            ? `${removed.length} ተማሪ(ዎች) በዳታቤዙ ውስጥ ስለሌሉ ከዝርዝሩ ተወግደዋል።`
+            : `${removed.length} student${removed.length === 1 ? '' : 's'} no longer in the database ${
+                removed.length === 1 ? 'was' : 'were'
+              } removed from this list.`
+        );
+      }
+    } catch (e) {
+      console.warn('Registration sync failed:', e);
+    } finally {
+      cloudSyncBusy.current = false;
+      if (cloudSyncQueued.current) {
+        cloudSyncQueued.current = false;
+        cloudSyncRef.current();
+      }
+    }
+  };
+
   useEffect(() => {
-    let cancelled = false;
-    fetchRegistrationsFromCloud().then((rows) => {
-      if (cancelled || rows.length === 0) return;
-      setRegisteredStudents((local) => {
-        const byId = new Map(local.map((r) => [r.id, r]));
-        rows.forEach((c) => {
-          const l = byId.get(c.id);
-          if (!l) {
-            byId.set(c.id, c);
-          } else {
-            const defined = Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined && v !== '' && v !== null));
-            byId.set(c.id, { ...l, ...defined });
-          }
-        });
-        const cloudIds = new Set(rows.map((r) => r.id));
-        local.filter((l) => !cloudIds.has(l.id)).forEach((l) => syncStudentToCloud(l).catch(() => {}));
-        return [...byId.values()].sort((x, y) => (y.registrationDate || '').localeCompare(x.registrationDate || ''));
-      });
-    });
+    const run = () => {
+      cloudSyncRef.current();
+    };
+    run();
+    const unsubscribe = subscribeToRegistrationsRealtime(run);
+    // Safety net for when realtime is not enabled or the connection dropped: re-check when the tab is reopened.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') run();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
-      cancelled = true;
+      unsubscribe();
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

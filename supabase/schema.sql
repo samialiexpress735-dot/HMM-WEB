@@ -277,3 +277,24 @@ ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_section        TEXT;
 ALTER TABLE grade_sections ADD COLUMN IF NOT EXISTS is_cte_section     BOOLEAN DEFAULT false;
 ALTER TABLE grade_sections ADD COLUMN IF NOT EXISTS cte_specialization TEXT;  -- e.g. 'Web Design and Development'
 UPDATE grade_sections SET is_cte_section = true WHERE section_code LIKE '%-CTE-%' AND is_cte_section IS NOT TRUE;
+
+
+-- Live updates for every table the website listens to (also available alone as supabase/enable_realtime.sql)
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    FOREACH t IN ARRAY ARRAY[
+      'teachers', 'grade_sections', 'registrations_2019',
+      'students', 'student_marks', 'timetable_slots', 'attendance_records'
+    ]
+    LOOP
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = t)
+         AND NOT EXISTS (SELECT 1 FROM pg_publication_tables
+                         WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t) THEN
+        EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+      END IF;
+    END LOOP;
+  END IF;
+END $$;
