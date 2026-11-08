@@ -461,8 +461,8 @@ export default function App() {
               teachers={teachers}
               sections={sections}
               onAddSections={handleAddSections}
-              students={students}
               onUpdateStudents={handleUpdateStudents}
+              previousYearStudents={students}
               lang={lang}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToTeacher={handleNavigateToTeacherPortal}

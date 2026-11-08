@@ -10,4 +10,6 @@ export const SCHOOL_INFO = {
   address: '',        // e.g. 'Kebele 03, Debre Berhan'
   officeHours: '',    // e.g. 'Mon–Fri, 8:00–17:00'
   founded: '',        // e.g. '1965 G.C.'
+  registrationYear: '2019 E.C.', // the year new students are being admitted for (CHECK THIS)
+  previousYear: '2018 E.C.',     // last year's records used for name suggestions
 };

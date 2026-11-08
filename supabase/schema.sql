@@ -75,8 +75,6 @@ CREATE TABLE IF NOT EXISTS registrations_2019 (
   full_name TEXT NOT NULL,
   full_name_amharic TEXT,
   gender CHAR(1) CHECK (gender IN ('M', 'F')),
-  date_of_birth DATE,
-  previous_student_id TEXT,
   target_grade INT NOT NULL CHECK (target_grade BETWEEN 9 AND 12),
   stream TEXT,
   academic_year TEXT DEFAULT '2019 E.C.',
@@ -115,7 +113,6 @@ CREATE TABLE IF NOT EXISTS students (
   full_name TEXT NOT NULL,
   full_name_amharic TEXT,
   gender CHAR(1) CHECK (gender IN ('M', 'F')),
-  date_of_birth DATE,
   grade INT NOT NULL,
   section TEXT NOT NULL,
   stream TEXT,
@@ -267,3 +264,10 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE attendance_records;
   END IF;
 END $$;
+
+
+-- CTE ranked choices (also available alone as supabase/add_cte_choices.sql)
+ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_choices        TEXT;  -- ranked, best first, separated by |
+ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_specialization TEXT;  -- track the student was placed in
+ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_rank           INT;   -- which choice was granted (1-4)
+ALTER TABLE registrations_2019 ADD COLUMN IF NOT EXISTS cte_section        TEXT;  -- e.g. 11-CTE-WD

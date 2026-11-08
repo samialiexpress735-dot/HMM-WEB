@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UserPlus,
+  Search,
   Users,
   Calendar,
   AlertTriangle,
@@ -39,6 +40,7 @@ import {
   RegisteredStudent2019,
   TimetableSlot,
   SectionAllocationBucket,
+  recommendPreviousYearStudents,
   allocateStudentsToSections,
   reassignStudentToSection,
   generateSectionRosterCsv,
@@ -46,21 +48,12 @@ import {
   DAYS_OF_WEEK,
   PERIOD_TIMES
 } from '../utils/registrationAndTimetable';
-import { PreviousStudentCheck } from './PreviousStudentCheck';
-import {
-  buildStudentMatchIndex,
-  composeFullName,
-  mergePreviousRecords,
-  splitFullName,
-  studentToPreviousRecord
-} from '../utils/studentMatching';
 import {
   PREVIOUS_YEAR_ARCHIVE_STUDENTS,
   INITIAL_REGISTERED_2019_STUDENTS,
   INITIAL_TIMETABLE_SLOTS
 } from '../data/registrationArchiveData';
 import {
-  Student,
   Teacher,
   GradeSection,
   STANDARD_GRADE_9_10_SUBJECTS,
@@ -69,15 +62,25 @@ import {
   CTE_SPECIALIZATION_OPTIONS,
   CTESpecialization
 } from '../data/schoolData';
-import { syncStudentToCloud, syncTimetableSlotToCloud } from '../lib/supabase';
+import { syncStudentToCloud, syncTimetableSlotToCloud, fetchRegistrationsFromCloud } from '../lib/supabase';
+import {
+  normalizeName,
+  studentsToArchive,
+  suggestPreviousStudents,
+  allocateCteByMerit,
+  choicesOf,
+  CteTrack
+} from '../utils/registrarLogic';
+import { Student } from '../data/schoolData';
+import { SCHOOL_INFO } from '../data/schoolInfo';
 
 interface RegistrarAdminPageProps {
   teachers: Teacher[];
   sections: GradeSection[];
   onAddSections: (newSections: GradeSection[]) => void;
-  /** Currently enrolled students. They become next year's "previous-year" records for matching. */
-  students?: Student[];
   onUpdateStudents?: (students: any[] | ((prev: any[]) => any[])) => void;
+  /** The school's current students: last year's records used for name suggestions. */
+  previousYearStudents?: Student[];
   lang: 'en' | 'am';
   onNavigateToGrades?: () => void;
   onNavigateToTeacher?: (sectionCode?: string, subjectId?: string) => void;
@@ -90,8 +93,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   teachers,
   sections,
   onAddSections,
-  students: enrolledStudents = [],
   onUpdateStudents,
+  previousYearStudents = [],
   lang,
   onNavigateToGrades,
   onNavigateToTeacher,
@@ -144,11 +147,18 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Registration Form State
   const [targetGrade, setTargetGrade] = useState<number>(9);
   const [targetStream, setTargetStream] = useState<'Natural Science' | 'Social Science'>('Natural Science');
-  const [cteSpecialization, setCteSpecialization] = useState<CTESpecialization>('Web Design and Development');
-  const [firstName, setFirstName] = useState<string>('');
-  const [fatherName, setFatherName] = useState<string>('');
-  const [grandfatherName, setGrandfatherName] = useState<string>('');
-  const [dateOfBirth, setDateOfBirth] = useState<string>('');
+  const [cteChoices, setCteChoices] = useState<string[]>([]);
+  const [lastTyped, setLastTyped] = useState<'en' | 'am'>('en');
+  const [suggestOpen, setSuggestOpen] = useState<boolean>(false);
+  const [activeIdx, setActiveIdx] = useState<number>(0);
+  const [linked, setLinked] = useState<ArchiveStudent | null>(null);
+  const [formError, setFormError] = useState<string>('');
+  const [toast, setToast] = useState<string | null>(null);
+  const [cteCapacities, setCteCapacities] = useState<Record<string, number>>({});
+  const [cteUnplaced, setCteUnplaced] = useState<RegisteredStudent2019[]>([]);
+  const [cteRankCounts, setCteRankCounts] = useState<number[]>([0, 0, 0, 0]);
+  const [allocationNotice, setAllocationNotice] = useState<string>('');
+  const [fullName, setFullName] = useState<string>('');
   const [fullNameAmharic, setFullNameAmharic] = useState<string>('');
   const [gender, setGender] = useState<'M' | 'F'>('M');
   const [previousSchool, setPreviousSchool] = useState<string>('Debre Berhan Primary School');
@@ -159,20 +169,9 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [guardianPhone, setGuardianPhone] = useState<string>('+251 91 ');
   const [conduct, setConduct] = useState<'A' | 'B' | 'C' | 'D'>('A');
 
-  // Previous Student Check state
-  const [previousStudentIdInput, setPreviousStudentIdInput] = useState<string>('');
-  const [linkedRecord, setLinkedRecord] = useState<ArchiveStudent | null>(null);
-  const [checkSession, setCheckSession] = useState<number>(0); // bump to reset the check panel
-  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(() => new Set());
-  const autoFillTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (autoFillTimer.current) clearTimeout(autoFillTimer.current);
-  }, []);
-
-  const fullName = composeFullName(firstName, fatherName, grandfatherName);
-
   // Allocation State
   const [allocationGrade, setAllocationGrade] = useState<number>(9);
+  const [allocationKind, setAllocationKind] = useState<'academic' | 'cte'>('academic');
   const [allocationStream, setAllocationStream] = useState<'Natural Science' | 'Social Science'>('Natural Science');
   const [studentsPerSection, setStudentsPerSection] = useState<number>(6);
   const [targetCapacity, setTargetCapacity] = useState<number>(45);
@@ -203,152 +202,173 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const [clashError, setClashError] = useState<string | null>(null);
   const [clashErrorAmharic, setClashErrorAmharic] = useState<string | null>(null);
 
-  // Previous-year records = the static archive + students enrolled this year.
-  // The index is rebuilt only when that list changes, so typing stays fast.
-  const previousRecords = useMemo(
-    () => mergePreviousRecords(archiveStudents, enrolledStudents.map(studentToPreviousRecord)),
-    [archiveStudents, enrolledStudents]
+  const T = (en: string, am: string) => (lang === 'am' ? am : en);
+  const labelCls = 'mb-1.5 block text-xs font-semibold text-slate-600';
+  const inputCls =
+    'w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200';
+
+  // ---- Name suggestions from last year's records ----------------------------------------------
+  // The pool is the school's real student list plus the older archive. Grade 12 graduates are excluded.
+  const previousPool = React.useMemo(() => {
+    const live = studentsToArchive(previousYearStudents);
+    const liveIds = new Set(live.map((x) => x.studentId));
+    // The demo archive is only a stand-in until the school has real students.
+    return live.length > 0 ? live : archiveStudents.filter((x) => !liveIds.has(x.studentId));
+  }, [previousYearStudents, archiveStudents]);
+
+  const typedName = lastTyped === 'am' ? fullNameAmharic : fullName;
+  const suggestions = React.useMemo(
+    () => (linked ? [] : suggestPreviousStudents(previousPool, typedName)),
+    [previousPool, typedName, linked]
   );
-  const matchIndex = useMemo(() => buildStudentMatchIndex(previousRecords), [previousRecords]);
+  const alreadyRegistered = (c: ArchiveStudent) =>
+    registeredStudents.some(
+      (r) => r.targetGrade === c.eligibleForGrade && normalizeName(r.fullName) === normalizeName(c.fullName)
+    );
 
-  // Previous students that already have a registration this year (prevents double registration).
-  const alreadyRegisteredPreviousIds = useMemo(
-    () => new Set(registeredStudents.map((s) => s.previousStudentId).filter((id): id is string => Boolean(id))),
-    [registeredStudents]
-  );
-
-  // What the administrator has entered so far, checked against previous-year records.
-  const matchQuery = useMemo(
-    () => ({
-      firstName,
-      fatherName,
-      grandfatherName,
-      fullNameAmharic,
-      dateOfBirth,
-      gender,
-      guardianName,
-      guardianPhone,
-      targetGrade
-    }),
-    [firstName, fatherName, grandfatherName, fullNameAmharic, dateOfBirth, gender, guardianName, guardianPhone, targetGrade]
-  );
-
-  const fillRing = (field: string) =>
-    autoFilledFields.has(field) ? ' ring-2 ring-emerald-400 border-emerald-400 bg-emerald-50' : '';
-
-  // Administrator confirmed a suggestion: fill the form from the previous record.
-  const handleUsePreviousStudent = (cand: ArchiveStudent) => {
-    const filled = new Set<string>();
-    const names = splitFullName(cand.fullName);
-    setFirstName(names.firstName);
-    setFatherName(names.fatherName);
-    setGrandfatherName(names.grandfatherName);
-    filled.add('name');
-    if (cand.fullNameAmharic) {
-      setFullNameAmharic(cand.fullNameAmharic);
-      filled.add('amharic');
-    }
-    if (cand.dateOfBirth) {
-      setDateOfBirth(cand.dateOfBirth);
-      filled.add('dob');
-    }
-    setGender(cand.gender);
-    filled.add('gender');
-    if (cand.previousSchool) {
-      setPreviousSchool(cand.previousSchool);
-      filled.add('school');
-    }
-    setPreviousGrade(cand.previousGrade);
-    setPreviousSection(cand.previousSection);
-    if (cand.previousAverageScore > 0) {
-      setPreviousScore(cand.previousAverageScore);
-      filled.add('score');
-    }
-    if (cand.guardianName) {
-      setGuardianName(cand.guardianName);
-      filled.add('guardianName');
-    }
-    if (cand.guardianPhone) {
-      setGuardianPhone(cand.guardianPhone);
-      filled.add('guardianPhone');
-    }
-    setConduct(cand.conduct);
-    if (cand.recommendedStream) {
-      setTargetStream(cand.recommendedStream);
-    }
-
-    setLinkedRecord(cand);
-    setPreviousStudentIdInput('');
-    setAutoFilledFields(filled);
-    if (autoFillTimer.current) clearTimeout(autoFillTimer.current);
-    autoFillTimer.current = setTimeout(() => setAutoFilledFields(new Set()), 4000);
+  const handleSelectSuggestion = (c: ArchiveStudent) => {
+    setFullName(c.fullName);
+    setFullNameAmharic(c.fullNameAmharic);
+    setGender(c.gender);
+    setPreviousSchool(c.previousSchool);
+    setPreviousGrade(c.previousGrade);
+    setPreviousSection(c.previousSection);
+    if (c.previousAverageScore > 0) setPreviousScore(c.previousAverageScore);
+    setGuardianName(c.guardianName);
+    setGuardianPhone(c.guardianPhone);
+    setConduct(c.conduct);
+    if (c.eligibleForGrade >= 9 && c.eligibleForGrade <= 12) setTargetGrade(c.eligibleForGrade);
+    if (c.recommendedStream) setTargetStream(c.recommendedStream);
+    setLinked(c);
+    setSuggestOpen(false);
+    setActiveIdx(0);
+    setFormError('');
   };
 
-  const handleUnlinkPreviousStudent = () => {
-    setLinkedRecord(null);
-    setAutoFilledFields(new Set());
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    if (!suggestOpen || suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      const pick = suggestions[activeIdx]?.student;
+      if (pick && !alreadyRegistered(pick)) {
+        e.preventDefault();
+        handleSelectSuggestion(pick);
+      }
+    } else if (e.key === 'Escape') {
+      setSuggestOpen(false);
+    }
   };
+
+  // Tap a CTE track to add it to the ranking; tap it again to remove it.
+  const toggleCteChoice = (label: string) =>
+    setCteChoices((prev) => (prev.includes(label) ? prev.filter((x) => x !== label) : [...prev, label]));
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // Load registrations saved from other devices, and send up any that only exist here.
+  useEffect(() => {
+    let cancelled = false;
+    fetchRegistrationsFromCloud().then((rows) => {
+      if (cancelled || rows.length === 0) return;
+      setRegisteredStudents((local) => {
+        const byId = new Map(local.map((r) => [r.id, r]));
+        rows.forEach((c) => {
+          const l = byId.get(c.id);
+          if (!l) {
+            byId.set(c.id, c);
+          } else {
+            const defined = Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined && v !== '' && v !== null));
+            byId.set(c.id, { ...l, ...defined });
+          }
+        });
+        const cloudIds = new Set(rows.map((r) => r.id));
+        local.filter((l) => !cloudIds.has(l.id)).forEach((l) => syncStudentToCloud(l).catch(() => {}));
+        return [...byId.values()].sort((x, y) => (y.registrationDate || '').localeCompare(x.registrationDate || ''));
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Submit new registration
   const handleRegisterStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim()) return;
+    setFormError('');
+    const name = fullName.trim();
+    if (!name) {
+      setFormError(lang === 'am' ? 'እባክዎ የተማሪውን ስም ያስገቡ።' : 'Please enter the student’s name.');
+      return;
+    }
+    if (targetGrade >= 11 && cteChoices.length < CTE_SPECIALIZATION_OPTIONS.length) {
+      setFormError(
+        lang === 'am'
+          ? 'እባክዎ አራቱንም የCTE ሙያዎች በምርጫ ቅደም ተከተል ያስቀምጡ።'
+          : 'Please rank all four CTE tracks, from 1st choice to 4th choice.'
+      );
+      return;
+    }
+    if (registeredStudents.some((r) => r.targetGrade === targetGrade && normalizeName(r.fullName) === normalizeName(name))) {
+      setFormError(
+        lang === 'am'
+          ? `${name} ለ${targetGrade}ኛ ክፍል አስቀድሞ ተመዝግቧል።`
+          : `${name} is already registered for Grade ${targetGrade}.`
+      );
+      return;
+    }
 
-    const newStudentId = `HMM-2017-${targetGrade.toString().padStart(2, '0')}${String(
-      registeredStudents.length + 1
-    ).padStart(2, '0')}`;
+    const yearNum = parseInt(SCHOOL_INFO.registrationYear, 10) || new Date().getFullYear();
+    const prefix = `HMM-${yearNum}-${targetGrade.toString().padStart(2, '0')}`;
+    const taken = new Set(registeredStudents.map((r) => r.studentId));
+    let n = registeredStudents.length + 1;
+    while (taken.has(`${prefix}${String(n).padStart(2, '0')}`)) n++;
+    const newStudentId = `${prefix}${String(n).padStart(2, '0')}`;
 
     const newStudent: RegisteredStudent2019 = {
       id: `reg-${Date.now()}`,
       studentId: newStudentId,
-      fullName: fullName.trim(),
-      fullNameAmharic: fullNameAmharic.trim() || fullName.trim(),
+      fullName: name,
+      fullNameAmharic: fullNameAmharic.trim() || name,
       gender,
-      dateOfBirth: dateOfBirth || undefined,
-      previousStudentId: linkedRecord?.studentId,
       targetGrade,
       stream: targetGrade >= 11 ? targetStream : undefined,
-      cteSpecialization: targetGrade >= 11 ? cteSpecialization : undefined,
-      academicYear: '2017 E.C.',
+      cteChoices: targetGrade >= 11 ? cteChoices : undefined,
+      cteSpecialization: targetGrade >= 11 ? cteChoices[0] : undefined,
+      academicYear: SCHOOL_INFO.registrationYear,
       previousSchool: previousSchool.trim() || 'Debre Berhan Feeder School',
       previousGrade,
       previousSection,
-      previousAverageScore: Number(previousScore) || 80,
+      previousAverageScore: Number(previousScore) || 0,
       guardianName: guardianName.trim() || 'Parent/Guardian',
       guardianPhone: guardianPhone.trim() || '+251 91 000 0000',
       conduct,
       registrationDate: new Date().toISOString().split('T')[0],
-      avatar:
-        gender === 'F'
-          ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
-          : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80'
+      avatar: ''
     };
 
     setRegisteredStudents((prev) => [newStudent, ...prev]);
     syncStudentToCloud(newStudent).catch(() => {});
 
-    // Reset fields
-    setFirstName('');
-    setFatherName('');
-    setGrandfatherName('');
+    setFullName('');
     setFullNameAmharic('');
-    setDateOfBirth('');
     setGuardianName('');
     setGuardianPhone('+251 91 ');
-    setPreviousStudentIdInput('');
-    setLinkedRecord(null);
-    setAutoFilledFields(new Set());
-    setCheckSession((n) => n + 1);
-    alert(
+    setLinked(null);
+    setCteChoices([]);
+    setSuggestOpen(false);
+    setToast(
       lang === 'am'
-        ? `ተማሪ ${newStudent.fullNameAmharic} ለ2017 ዓ.ም. በ${targetGrade}ኛ ክፍል ${
-            targetGrade >= 11
-              ? `(${targetStream === 'Natural Science' ? 'የተፈጥሮ ሳይንስ' : 'የማህበራዊ ሳይንስ'} - ${cteSpecialization})`
-              : ''
-          } በተሳካ ሁኔታ ተመዝግቧል!`
-        : `Student ${newStudent.fullName} successfully registered for 2017 E.C. Grade ${targetGrade}${
-            targetGrade >= 11 ? ` (${targetStream} - ${cteSpecialization})` : ''
-          }!`
+        ? `${newStudent.fullNameAmharic} ለ${targetGrade}ኛ ክፍል ተመዝግቧል።`
+        : `${newStudent.fullName} is registered for Grade ${targetGrade}.`
     );
   };
 
@@ -390,76 +410,84 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     };
 
     const buckets = allocateStudentsToSections(candidates, options);
+    setCteUnplaced([]);
+    setAllocationNotice('');
     setPreviewBuckets(buckets);
     setAllocationSuccessMessage('');
     setHasCommittedCurrentPreview(false);
     setShowCommitSuccessModal(false);
   };
 
-  // Generate Grade 11 & 12 CTE Practical Cohort Sections (Cross-Homeroom Grouping)
+  // CTE tracks with their seat limits. Students rank all four tracks; highest marks are placed first.
+  const cteTracks: CteTrack[] = CTE_SPECIALIZATION_OPTIONS.map((o) => ({
+    labelEn: o.labelEn,
+    code: o.code,
+    capacity: cteCapacities[o.labelEn] ?? 40
+  }));
+
   const handleGenerateCteSections = () => {
     const grade = allocationGrade >= 11 ? allocationGrade : 11;
-    const candidates = registeredStudents.filter((s) => s.targetGrade === grade && s.cteSpecialization);
-
+    const candidates = registeredStudents.filter((st) => st.targetGrade === grade && choicesOf(st).length > 0);
     if (candidates.length === 0) {
-      alert(
+      setPreviewBuckets(null);
+      setCteUnplaced([]);
+      setAllocationNotice(
         lang === 'am'
-          ? `ለ${grade}ኛ ክፍል የስራና ቴክኒክ (CTE) ሙያ የመረጡ ተማሪዎች አልተገኙም!`
-          : `No registered Grade ${grade} students found with selected CTE specializations! Please register students with CTE electives first.`
+          ? `ለ${grade}ኛ ክፍል የCTE ሙያ የመረጡ ተማሪዎች የሉም።`
+          : `No Grade ${grade} students have chosen CTE tracks yet. Register students first.`
       );
       return;
     }
-
-    const specDefs = [
-      { id: 'web-dev', labelEn: 'Web Design and Development', code: 'WD' },
-      { id: 'accounting', labelEn: 'Accounting', code: 'ACC' },
-      { id: 'marketing', labelEn: 'Marketing', code: 'MKT' },
-      { id: 'construction', labelEn: 'Construction', code: 'CST' }
-    ];
-
-    const cteBuckets: SectionAllocationBucket[] = [];
-
-    specDefs.forEach((def, idx) => {
-      const matched = candidates.filter((st) => {
-        const c = (st.cteSpecialization || '').toLowerCase();
-        return c.includes(def.labelEn.toLowerCase()) || c.includes(def.id) || c.includes(def.code.toLowerCase());
-      });
-
-      if (matched.length > 0) {
-        const maleCount = matched.filter((s) => s.gender === 'M').length;
-        const femaleCount = matched.filter((s) => s.gender === 'F').length;
-        const avgScore = Math.round(
-          matched.reduce((acc, s) => acc + (s.previousAverageScore || 80), 0) / matched.length
-        );
-
-        cteBuckets.push({
-          sectionCode: `${grade}-CTE-${def.code}`,
-          sectionLetter: `CTE-${def.code}`,
-          students: matched,
-          maleCount,
-          femaleCount,
-          averageScore: avgScore,
-          maxCapacity: 50,
-          roomNumber: `Tech Lab ${idx + 1}`,
-          isCteSection: true,
-          cteSpecialization: def.labelEn
-        });
-      }
-    });
-
-    if (cteBuckets.length === 0) {
-      alert('No matching students found for CTE cohorts.');
-      return;
-    }
-
-    setPreviewBuckets(cteBuckets);
-    setAllocationSuccessMessage(
-      lang === 'am'
-        ? `ለ${grade}ኛ ክፍል ${cteBuckets.length} የCTE ሙያ ክፍሎች (${cteBuckets.map((b) => b.sectionCode).join(', ')}) በተሳካ ሁኔታ ተዘጋጅተዋል!`
-        : `Generated ${cteBuckets.length} specialized CTE Cohort Sections (${cteBuckets.map((b) => b.sectionCode).join(', ')}) based on student vocational electives!`
-    );
+    const res = allocateCteByMerit(candidates, cteTracks, grade);
+    setPreviewBuckets(res.buckets.length ? res.buckets : null);
+    setCteUnplaced(res.unplaced);
+    setCteRankCounts(res.rankCounts);
+    setAllocationNotice('');
+    setAllocationSuccessMessage('');
     setHasCommittedCurrentPreview(false);
     setShowCommitSuccessModal(false);
+  };
+
+  // Put a student who got no seat into a chosen track (this may go over that track's seat limit).
+  const handlePlaceUnplaced = (studentId: string, trackLabel: string) => {
+    const st = cteUnplaced.find((x) => x.id === studentId);
+    const track = cteTracks.find((t) => t.labelEn === trackLabel);
+    if (!st || !track) return;
+    const grade = allocationGrade >= 11 ? allocationGrade : 11;
+    const placed: RegisteredStudent2019 = {
+      ...st,
+      cteSpecialization: track.labelEn,
+      cteRank: choicesOf(st).indexOf(track.labelEn) + 1 || undefined,
+      cteSection: `${grade}-CTE-${track.code}`
+    };
+    setPreviewBuckets((prev) => {
+      const buckets = prev ? [...prev] : [];
+      const i = buckets.findIndex((b) => b.cteSpecialization === track.labelEn);
+      if (i >= 0) {
+        const list = [...buckets[i].students, placed];
+        buckets[i] = {
+          ...buckets[i],
+          students: list,
+          maleCount: list.filter((x) => x.gender === 'M').length,
+          femaleCount: list.filter((x) => x.gender === 'F').length
+        };
+      } else {
+        buckets.push({
+          sectionCode: `${grade}-CTE-${track.code}`,
+          sectionLetter: `CTE-${track.code}`,
+          students: [placed],
+          maleCount: placed.gender === 'M' ? 1 : 0,
+          femaleCount: placed.gender === 'F' ? 1 : 0,
+          averageScore: Math.round(placed.previousAverageScore || 0),
+          maxCapacity: track.capacity,
+          roomNumber: `Tech Lab ${cteTracks.indexOf(track) + 1}`,
+          isCteSection: true,
+          cteSpecialization: track.labelEn
+        });
+      }
+      return buckets;
+    });
+    setCteUnplaced((prev) => prev.filter((x) => x.id !== studentId));
   };
 
   // Move Student from one preview section to another
@@ -472,7 +500,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Export Allocation Rosters to Official CSV
   const handleDownloadCsv = () => {
     if (!previewBuckets || previewBuckets.length === 0) return;
-    const csvContent = generateSectionRosterCsv(previewBuckets, '2017 E.C.');
+    const csvContent = generateSectionRosterCsv(previewBuckets, '2019 E.C.');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -570,14 +598,30 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     onAddSections(newGradeSections);
 
     // Update allocatedSection status on registered students
+    // A student has ONE academic section and (Grades 11-12) ONE CTE track. A CTE group never replaces the academic section.
     const allocatedMap = new Map<string, string>();
+    const cteMap = new Map<string, { track: string; rank?: number; section: string }>();
     previewBuckets.forEach((b) => {
-      b.students.forEach((st) => allocatedMap.set(st.id, b.sectionCode));
+      b.students.forEach((st) => {
+        if (b.isCteSection) {
+          cteMap.set(st.id, { track: b.cteSpecialization || '', rank: st.cteRank, section: b.sectionCode });
+        } else {
+          allocatedMap.set(st.id, b.sectionCode);
+        }
+      });
     });
 
-    setRegisteredStudents((prev) =>
-      prev.map((s) => (allocatedMap.has(s.id) ? { ...s, allocatedSection: allocatedMap.get(s.id) } : s))
-    );
+    const updatedRegistered = registeredStudents.map((s) => {
+      let u = s;
+      if (allocatedMap.has(s.id)) u = { ...u, allocatedSection: allocatedMap.get(s.id) };
+      const c = cteMap.get(s.id);
+      if (c) u = { ...u, cteSpecialization: c.track, cteRank: c.rank, cteSection: c.section };
+      return u;
+    });
+    setRegisteredStudents(updatedRegistered);
+    updatedRegistered.forEach((s, i) => {
+      if (s !== registeredStudents[i]) syncStudentToCloud(s).catch(() => {});
+    });
 
     // Also convert to active school students with properly initialized subjects (0 initial score)
     if (onUpdateStudents) {
@@ -589,7 +633,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
       }
 
-      const convertedStudents = previewBuckets.flatMap((bucket) => {
+      const convertedStudents = previewBuckets.filter((b) => !b.isCteSection).flatMap((bucket) => {
         return bucket.students.map((st, idx) => {
           const studentSubjects = (bucket.isCteSection
             ? [
@@ -619,12 +663,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             fullName: st.fullName,
             fullNameAmharic: st.fullNameAmharic || st.fullName,
             gender: st.gender,
-            dateOfBirth: st.dateOfBirth,
             grade: allocationGrade,
             section: bucket.sectionLetter,
             stream: st.stream,
-            cteSpecialization: st.cteSpecialization,
-            academicYear: '2017 E.C.',
+            cteSpecialization: st.cteSection ? st.cteSpecialization : undefined,
+            academicYear: SCHOOL_INFO.registrationYear,
             homeroomTeacher: 'To be assigned',
             guardianName: st.guardianName || 'Parent/Guardian',
             guardianPhone: st.guardianPhone || '+251 91 000 0000',
@@ -652,14 +695,39 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
         const kept = prevArr.filter((s: any) => !newIds.has(s.id));
         return [...kept, ...convertedStudents];
       });
+
+      // Students already in the school's list keep their section and subjects; they only gain their CTE track.
+      if (cteMap.size > 0) {
+        onUpdateStudents((prev: any) =>
+          (Array.isArray(prev) ? prev : []).map((s: any) => {
+            const c = cteMap.get(s.id);
+            if (!c) return s;
+            const label = `Career & Technical: ${c.track}`;
+            const labelAm = `የስራና ቴክኒክ፡ ${c.track}`;
+            return {
+              ...s,
+              cteSpecialization: c.track,
+              semesters: (s.semesters || []).map((sem: any) => ({
+                ...sem,
+                subjects: sem.subjects.some((x: any) => x.subjectId === 'cte')
+                  ? sem.subjects.map((x: any) => (x.subjectId === 'cte' ? { ...x, subjectName: label, subjectAmharic: labelAm } : x))
+                  : [
+                      ...sem.subjects,
+                      { subjectId: 'cte', subjectName: label, subjectAmharic: labelAm, teacherName: 'Unassigned', continuousAssessment: 0, midExam: 0, finalExam: 0, totalScore: 0 }
+                    ]
+              }))
+            };
+          })
+        );
+      }
     }
 
     setAllocationSuccessMessage(
       lang === 'am'
-        ? `በ2017 ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
+        ? `በ2019 ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) በተሳካ ሁኔታ ተፈጥረዋል!`
-        : `Successfully created ${previewBuckets.length} new 2017 E.C. sections (${previewBuckets
+        : `Successfully created ${previewBuckets.length} new 2019 E.C. sections (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) with room assignments and merit/gender balancing!`
     );
@@ -803,497 +871,366 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in w-full max-w-full">
-      {/* Dedicated Admin Navigation Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs">
-        <div className="flex items-center gap-2">
+      {/* Top bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 p-3 text-white">
+        <div className="flex flex-wrap items-center gap-2">
           {onNavigateToAdmin && (
-            <button
-              onClick={onNavigateToAdmin}
-              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>{lang === 'am' ? '← ወደ አስተዳዳሪ ዴስክ' : '← Back to admin'}</span>
+            <button onClick={onNavigateToAdmin} className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {T('Back to admin', 'ወደ አስተዳዳሪ ተመለስ')}
             </button>
           )}
           {onNavigateToGrades && (
-            <button
-              onClick={onNavigateToGrades}
-              className="btn-animated px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Layers className="w-3.5 h-3.5 text-amber-400" />
-              <span>{lang === 'am' ? 'ክፍሎችና ሴክሽኖች →' : 'Classes & Sections →'}</span>
+            <button onClick={onNavigateToGrades} className="btn-academic flex items-center gap-1.5 rounded-full bg-amber-400 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-300 cursor-pointer">
+              <Layers className="h-3.5 w-3.5" />
+              {T('Classes & Sections', 'ክፍሎችና ሴክሽኖች')} →
             </button>
           )}
         </div>
-
         <div className="flex items-center gap-2">
           {onNavigateHome && (
-            <button
-              onClick={onNavigateHome}
-              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-              title="View Public School Website"
-            >
-              <Globe className="w-3.5 h-3.5 text-emerald-700" />
-              <span>{lang === 'am' ? 'ድረ-ገጽ' : 'Public Site'}</span>
+            <button onClick={onNavigateHome} title="View public website" className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-slate-100 transition-colors hover:bg-white/15 cursor-pointer">
+              <Globe className="h-3.5 w-3.5 text-amber-300" />
+              {T('Public site', 'ድረ-ገጽ')}
             </button>
           )}
           {onSignOutAdmin && (
-            <button
-              onClick={onSignOutAdmin}
-              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-              title="Sign out of Administrator Suite"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>{lang === 'am' ? 'ውጣ' : 'Sign Out'}</span>
+            <button onClick={onSignOutAdmin} title="Sign out" className="flex items-center gap-1.5 rounded-full border border-rose-400/20 bg-rose-500/15 px-3.5 py-2 text-xs font-bold text-rose-300 transition-colors hover:bg-rose-500/25 cursor-pointer">
+              <LogOut className="h-3.5 w-3.5" />
+              {T('Sign out', 'ውጣ')}
             </button>
           )}
         </div>
       </div>
 
-      {/* 1. OFFICIAL MOE REGISTRAR HERO BAR */}
-      <div className="bg-gradient-to-r from-emerald-900 via-slate-900 to-emerald-950 text-white rounded-3xl p-6 sm:p-8 shadow-md border border-emerald-800/80 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-400/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 shadow-sm flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                2017 E.C. Academic Year Intake
-              </span>
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-800/90 text-emerald-200 border border-emerald-700">
-                የ2017 ዓ.ም. የተማሪዎች ምዝገባ ቢሮ
-              </span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              {lang === 'am'
-                ? 'የ2017 ዓ.ም. አዲስ ዓመት ምዝገባ፣ የክፍል ድልድልና የመምህራን ክፍለ-ጊዜ ምደባ'
-                : 'Registrar: admissions, sections and timetables'}
-            </h1>
-            <p className="text-xs sm:text-sm text-emerald-100/90 max-w-3xl">
-              {lang === 'am'
-                ? 'የቀድሞ ተማሪዎችን በመፈለግ በስማቸው አውቶኮምፕሊት ይመዝግቡ፣ በዘፈቀደ ወይም በፆታ ሚዛን ክፍሎችን ያዋቅሩ፣ እንዲሁም የመምህራንን ክፍለ-ጊዜ ያለ ምንም ግጭት ያደራጁ።'
-                : 'Intelligently autocomplete applicant data from feeder schools, auto-allocate students into sections, and assign teachers without period timetable clashes.'}
+      {/* Header with live numbers */}
+      <section className="fade-up relative overflow-hidden rounded-3xl bg-slate-950 px-6 py-7 text-white sm:px-8">
+        <div className="academic-ribbon absolute inset-x-0 top-0" aria-hidden="true" />
+        <div className="grid-backdrop absolute inset-0" aria-hidden="true" />
+        <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-2xl space-y-2">
+            <span className="inline-block rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold text-slate-950">
+              {T('Admissions', 'ምዝገባ')} {SCHOOL_INFO.registrationYear}
+            </span>
+            <h1 className="font-display text-2xl font-bold sm:text-3xl">{T('Admissions and classes', 'ምዝገባና የክፍል ምደባ')}</h1>
+            <p className="text-sm leading-relaxed text-slate-300">
+              {T(
+                'Register students, place them into classes and CTE tracks, then build the timetable.',
+                'ተማሪዎችን ይመዝግቡ፣ ወደ ክፍሎችና የCTE ሙያዎች ይመድቡ፣ ከዚያ የጊዜ ሰሌዳ ያዘጋጁ።'
+              )}
             </p>
           </div>
-
-          {/* Quick Metrics */}
-          <div className="flex items-center gap-3">
-            <div className="bg-slate-800/80 backdrop-blur-sm border border-emerald-700/50 p-4 rounded-2xl text-center min-w-[110px]">
-              <span className="text-[10px] uppercase font-bold text-emerald-300 block">Registered (2017)</span>
-              <span className="text-2xl font-black text-amber-400">{registeredStudents.length}</span>
-              <span className="text-[10px] text-slate-400 block">Applicants</span>
-            </div>
-            <div className="bg-slate-800/80 backdrop-blur-sm border border-emerald-700/50 p-4 rounded-2xl text-center min-w-[110px]">
-              <span className="text-[10px] uppercase font-bold text-emerald-300 block">Grade 9 Cohort</span>
-              <span className="text-2xl font-black text-white">
-                {registeredStudents.filter((s) => s.targetGrade === 9).length}
-              </span>
-              <span className="text-[10px] text-slate-400 block">In Admission</span>
-            </div>
-          </div>
+          <dl className="grid grid-cols-3 gap-3 text-center">
+            {[
+              [T('Registered', 'የተመዘገቡ'), registeredStudents.length],
+              [T('In a class', 'ክፍል ያገኙ'), registeredStudents.filter((r) => r.allocatedSection).length],
+              [T('Waiting', 'በመጠበቅ ላይ'), registeredStudents.length - registeredStudents.filter((r) => r.allocatedSection).length]
+            ].map(([k, v]) => (
+              <div key={String(k)} className="glass min-w-[88px] rounded-2xl px-4 py-3">
+                <dd className="font-mono text-2xl font-semibold tabular-nums text-white">{v}</dd>
+                <dt className="mt-0.5 text-[11px] text-slate-400">{k}</dt>
+              </div>
+            ))}
+          </dl>
         </div>
-      </div>
+      </section>
 
-      {/* 2. REGISTRAR WORKSPACE NAVIGATION BAR */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-sm flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setActiveTab('registration')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'registration'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <UserPlus className={`w-4 h-4 ${activeTab === 'registration' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? '1. የተማሪ ምዝገባና አውቶኮምፕሊት' : '1. Student Registration & Autocomplete'}</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeTab === 'registration' ? 'bg-emerald-700 text-white' : 'bg-slate-200 text-slate-800'
-              }`}
+      {/* Steps */}
+      <nav aria-label="Registrar steps" className="flex gap-2 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {([
+          ['registration', 1, T('Register students', 'ተማሪ መመዝገብ'), registeredStudents.length, UserPlus],
+          ['allocation', 2, T('Place in classes', 'ክፍል መመደብ'), registeredStudents.length - registeredStudents.filter((r) => r.allocatedSection).length, Shuffle],
+          ['timetable', 3, T('Timetable', 'የጊዜ ሰሌዳ'), undefined, Calendar]
+        ] as const).map(([id, n, label, count, Icon]) => {
+          const active = activeTab === id;
+          return (
+            <button
+              key={id} onClick={() => setActiveTab(id)} aria-current={active ? 'step' : undefined}
+              className={`flex shrink-0 items-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${active ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
             >
-              {registeredStudents.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('allocation')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'allocation'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Shuffle className={`w-4 h-4 ${activeTab === 'allocation' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? '2. በዘፈቀደ/በፆታ ክፍሎችን መመደቢያ' : '2. Random & Balanced Section Allocation'}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('timetable')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'timetable'
-                ? 'bg-emerald-800 text-white shadow-sm'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-            }`}
-          >
-            <Calendar className={`w-4 h-4 ${activeTab === 'timetable' ? 'text-amber-400' : 'text-slate-500'}`} />
-            <span>{lang === 'am' ? '3. የመምህራን ክፍለ-ጊዜና ግጭት መቆጣጠሪያ' : '3. Teacher Timetable & Period Clash Preventer'}</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200">
-              Clash Check
-            </span>
-          </button>
-        </div>
-
-        {onNavigateToGrades && (
-          <button
-            onClick={onNavigateToGrades}
-            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Layers className="w-4 h-4 text-amber-400" />
-            <span>{lang === 'am' ? 'ክፍሎችና ሴክሽኖችን ተመልከት →' : 'View Classes & Sections →'}</span>
-          </button>
-        )}
-      </div>
+              <span className={`flex h-5 w-5 items-center justify-center rounded-full font-mono text-[11px] ${active ? 'bg-amber-400 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
+              <Icon className={`h-4 w-4 ${active ? 'text-amber-300' : 'text-slate-400'}`} />
+              <span className="whitespace-nowrap">{label}</span>
+              {count !== undefined && (
+                <span className={`rounded-full px-2 py-0.5 font-mono text-[11px] tabular-nums ${active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-600'}`}>{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
 
       {/* =========================================================================
-          TAB 1: STUDENT REGISTRATION & LAST YEAR AUTOCOMPLETE RECOMMENDATION
+          TAB 1: STUDENT REGISTRATION (name suggestions from last year + ranked CTE choices)
          ========================================================================= */}
       {activeTab === 'registration' && (
         <div className="space-y-6">
-          {/* Top Instructions Banner */}
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-900 flex items-start gap-3">
-            <School className="w-5 h-5 text-emerald-700 flex-shrink-0 mt-0.5" />
-            <div>
-              <strong className="font-extrabold text-sm block">
-                {lang === 'am'
-                  ? 'ባለፈው ዓመት የተማሪዎች መዝገብ በራስ-ሰር ይፈተሻል'
-                  : 'Registration checks last year’s student records automatically'}
-              </strong>
-              <span>
-                {lang === 'am'
-                  ? 'የተማሪውን ስም፣ የአባት ስም እና የአያት ስም ሲጽፉ ሲስተሙ ተመሳሳይ የቀድሞ ተማሪ ካለ ይጠቁማል። እርስዎ እስኪያረጋግጡ ድረስ ምንም መረጃ ወደ ፎርሙ አይገባም።'
-                  : 'As you enter the student’s name, the system looks for a matching student from last year and suggests it. Nothing is copied into the form until you confirm.'}
-              </span>
+          {toast && (
+            <div role="status" className="fade-up fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white shadow-2xl">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              {toast}
             </div>
-          </div>
+          )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Form: Step 1 Grade + Registration Form with Previous Student Check */}
-            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-emerald-700" />
-                  <span>
-                    {lang === 'am' ? 'የአዲስ ተማሪ ምዝገባ ፎርም (2017 ዓ.ም.)' : '2017 E.C. Student Admission Form'}
-                  </span>
-                </h3>
-                <span className="text-[11px] font-bold text-slate-500">Academic Year: 2017 E.C.</span>
-              </div>
-
-              {/* Target Grade Selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  {lang === 'am' ? 'ተማሪው በ2017 ዓ.ም. የሚገባበት ክፍል (Target Grade to Join):' : 'Target Grade to Join in 2017 E.C.:'}
-                </label>
-                <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
-                  {[9, 10, 11, 12].map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => {
-                        setTargetGrade(g);
-                        setPreviousGrade(g - 1);
-                      }}
-                      className={`py-2 px-3 rounded-xl font-black text-xs transition-all cursor-pointer border ${
-                        targetGrade === g
-                          ? 'bg-emerald-800 text-white border-emerald-800 shadow-sm'
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      Grade {g} (ክፍል {g})
-                    </button>
-                  ))}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:col-span-7">
+              <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-5">
+                <div>
+                  <h3 className="flex items-center gap-2 font-display text-lg font-bold text-slate-900">
+                    <UserPlus className="h-5 w-5 text-emerald-700" />
+                    {T('New student admission', 'አዲስ ተማሪ ምዝገባ')}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {T(
+                      `Start typing a name. We look for the student in ${SCHOOL_INFO.previousYear} records and fill in the rest.`,
+                      `ስም መጻፍ ይጀምሩ። ተማሪውን በ${SCHOOL_INFO.previousYear} መዝገብ ውስጥ ፈልገን ቀሪውን እንሞላለን።`
+                    )}
+                  </p>
                 </div>
-              </div>
+                <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1 text-xs font-bold text-amber-300">
+                  {SCHOOL_INFO.registrationYear}
+                </span>
+              </header>
 
-              {/* STREAM SELECTION & CTE SPECIALIZATION (GRADES 11 & 12 ONLY) */}
-              {targetGrade >= 11 && (
-                <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 border-2 border-emerald-300 rounded-2xl p-4 space-y-3.5 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black text-slate-800">
-                      {lang === 'am'
-                        ? 'የመሰናዶ የትምህርት ዘርፍ ምረጥ (Academic Stream Toggle): *'
-                        : 'Select Preparatory Academic Stream (Natural vs. Social): *'}
-                    </label>
-                    <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-200/80 text-emerald-900 border border-emerald-300">
-                      Grade {targetGrade} MoE Stream
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Natural Science Button */}
-                    <button
-                      type="button"
-                      onClick={() => setTargetStream('Natural Science')}
-                      className={`p-3.5 rounded-xl border-2 text-left cursor-pointer transition-all ${
-                        targetStream === 'Natural Science'
-                          ? 'bg-emerald-900 text-white border-emerald-950 shadow-md ring-2 ring-emerald-500'
-                          : 'bg-white text-slate-800 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🧪</span>
-                          <span className="font-black text-xs">
-                            Natural Science (የተፈጥሮ ሳይንስ)
-                          </span>
-                        </div>
-                        {targetStream === 'Natural Science' && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                        )}
+              <form onSubmit={handleRegisterStudent} className="space-y-7 p-6">
+                {/* 1. Name, with suggestions */}
+                <section aria-labelledby="reg-name">
+                  <h4 id="reg-name" className="mb-3 text-sm font-bold text-slate-900">
+                    <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 text-[11px] text-white">1</span>
+                    {T('Student name', 'የተማሪው ስም')}
+                  </h4>
+                  <div className="relative">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={labelCls}>{T('Full name (English)', 'ሙሉ ስም (እንግሊዝኛ)')} *</label>
+                        <input
+                          type="text" autoComplete="off" value={fullName} placeholder="Yared Getachew Tadesse" className={inputCls}
+                          onChange={(e) => { setFullName(e.target.value); setLastTyped('en'); setSuggestOpen(true); setActiveIdx(0); if (linked) setLinked(null); }}
+                          onFocus={() => { setLastTyped('en'); setSuggestOpen(true); }}
+                          onBlur={() => setSuggestOpen(false)}
+                          onKeyDown={handleNameKeyDown}
+                        />
                       </div>
-                      <p className={`text-[10.5px] leading-relaxed ${
-                        targetStream === 'Natural Science' ? 'text-emerald-200' : 'text-slate-600'
-                      }`}>
-                        <strong>9 Subjects:</strong> English, Biology, Chemistry, Physics, Math, Amharic, Agriculture, IT, CTE
-                      </p>
-                    </button>
-
-                    {/* Social Science Button */}
-                    <button
-                      type="button"
-                      onClick={() => setTargetStream('Social Science')}
-                      className={`p-3.5 rounded-xl border-2 text-left cursor-pointer transition-all ${
-                        targetStream === 'Social Science'
-                          ? 'bg-amber-900 text-white border-amber-950 shadow-md ring-2 ring-amber-500'
-                          : 'bg-white text-slate-800 border-slate-200 hover:border-amber-300 hover:bg-amber-50/30'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">📜</span>
-                          <span className="font-black text-xs">
-                            Social Science (የማህበራዊ ሳይንስ)
-                          </span>
-                        </div>
-                        {targetStream === 'Social Science' && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                        )}
+                      <div>
+                        <label className={labelCls}>{T('Full name (Amharic)', 'ሙሉ ስም (አማርኛ)')}</label>
+                        <input
+                          type="text" autoComplete="off" value={fullNameAmharic} placeholder="ያሬድ ጌታቸው ታደሰ" className={inputCls}
+                          onChange={(e) => { setFullNameAmharic(e.target.value); setLastTyped('am'); setSuggestOpen(true); setActiveIdx(0); if (linked) setLinked(null); }}
+                          onFocus={() => { setLastTyped('am'); setSuggestOpen(true); }}
+                          onBlur={() => setSuggestOpen(false)}
+                          onKeyDown={handleNameKeyDown}
+                        />
                       </div>
-                      <p className={`text-[10.5px] leading-relaxed ${
-                        targetStream === 'Social Science' ? 'text-amber-200' : 'text-slate-600'
-                      }`}>
-                        <strong>8 Subjects:</strong> English, Math, Geography, History, Economics, IT, Citizenship, CTE
-                      </p>
-                    </button>
-                  </div>
-
-                  {/* CTE Specialization Elective Picker */}
-                  <div className="pt-2.5 border-t border-emerald-200/80">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-[11px] font-black text-slate-800">
-                        {lang === 'am'
-                          ? 'የስራና ቴክኒክ (CTE) ሙያ ምርጫ (Career & Technical Elective):'
-                          : 'CTE Specialization Package (Mandatory Practical Elective):'}
-                      </label>
-                      <span className="text-[10px] text-emerald-800 font-bold">
-                        Available in both Streams
-                      </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {CTE_SPECIALIZATION_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => setCteSpecialization(opt.labelEn)}
-                          className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
-                            cteSpecialization === opt.labelEn
-                              ? 'bg-emerald-800 text-white border-emerald-900 shadow-sm ring-2 ring-emerald-400 font-black'
-                              : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-50 font-bold'
-                          }`}
-                        >
-                          <div className="text-xs truncate">{opt.labelEn}</div>
-                          <div
-                            className={`text-[10px] truncate mt-0.5 ${
-                              cteSpecialization === opt.labelEn ? 'text-emerald-100' : 'text-slate-500'
-                            }`}
+                    {suggestOpen && !linked && typedName.trim().length >= 2 && (
+                      <div role="listbox" className="fade-up absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                        <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-slate-500">
+                          <Search className="h-3.5 w-3.5" />
+                          {suggestions.length > 0
+                            ? T(`From ${SCHOOL_INFO.previousYear} records`, `ከ${SCHOOL_INFO.previousYear} መዝገብ`)
+                            : T('No match in last year’s records', 'በባለፈው ዓመት መዝገብ አልተገኘም')}
+                        </div>
+                        {suggestions.length === 0 ? (
+                          <p className="px-4 py-4 text-sm text-slate-500">
+                            {T('This looks like a new or transfer student. Fill in the details below.', 'አዲስ ወይም ከሌላ ትምህርት ቤት የመጣ ተማሪ ይመስላል። ዝርዝሩን ከታች ይሙሉ።')}
+                          </p>
+                        ) : (
+                          suggestions.map(({ student: c }, i) => {
+                            const dup = alreadyRegistered(c);
+                            return (
+                              <button
+                                key={c.id} type="button" role="option" aria-selected={i === activeIdx} disabled={dup}
+                                onMouseDown={(e) => { e.preventDefault(); if (!dup) handleSelectSuggestion(c); }}
+                                onMouseEnter={() => setActiveIdx(i)}
+                                className={`flex w-full items-center gap-3 border-b border-slate-50 px-4 py-3 text-left transition-colors last:border-0 ${i === activeIdx ? 'bg-emerald-50' : 'hover:bg-slate-50'} ${dup ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                              >
+                                <span className="avatar-monogram h-9 w-9 shrink-0 rounded-full text-xs">
+                                  {c.fullName.split(' ').map((w) => w[0]).slice(0, 2).join('')}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-semibold text-slate-900">
+                                    {c.fullName}
+                                    {c.fullNameAmharic && <span className="font-normal text-slate-500"> · {c.fullNameAmharic}</span>}
+                                  </span>
+                                  <span className="block truncate text-xs text-slate-500">
+                                    {T('Last year', 'ባለፈው ዓመት')}: {c.previousSection}
+                                    {c.previousAverageScore > 0 ? ` · ${T('average', 'አማካይ')} ${c.previousAverageScore}%` : ''}
+                                  </span>
+                                </span>
+                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${dup ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-800'}`}>
+                                  {dup ? T('Already registered', 'ተመዝግቧል') : `→ ${T('Grade', 'ክፍል')} ${c.eligibleForGrade}`}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {linked && (
+                    <div className="fade-up mt-3 flex items-start justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                      <div className="flex items-start gap-2.5 text-sm text-emerald-900">
+                        <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                        <span>
+                          <b>{T('Matched with last year’s record.', 'ከባለፈው ዓመት መዝገብ ጋር ተዛምዷል።')}</b>{' '}
+                          {T('Details are filled in. Check them before you confirm.', 'ዝርዝሩ ተሞልቷል። ከማረጋገጥዎ በፊት ያረጋግጡ።')}
+                        </span>
+                      </div>
+                      <button type="button" onClick={() => setLinked(null)} className="shrink-0 text-xs font-semibold text-emerald-800 underline hover:text-emerald-950 cursor-pointer">
+                        {T('Not this student', 'ይህ ተማሪ አይደለም')}
+                      </button>
+                    </div>
+                  )}
+                </section>
+
+                {/* 2. Grade */}
+                <section aria-labelledby="reg-grade">
+                  <h4 id="reg-grade" className="mb-3 text-sm font-bold text-slate-900">
+                    <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 text-[11px] text-white">2</span>
+                    {T('Grade to join', 'የሚገባበት ክፍል')}
+                  </h4>
+                  <div className="inline-flex w-full gap-1 rounded-2xl bg-slate-100 p-1 sm:w-auto" role="radiogroup" aria-label="Grade">
+                    {[9, 10, 11, 12].map((g) => (
+                      <button
+                        key={g} type="button" role="radio" aria-checked={targetGrade === g}
+                        onClick={() => { setTargetGrade(g); setPreviousGrade(g - 1); }}
+                        className={`flex-1 rounded-xl px-5 py-2 text-sm font-bold transition-all cursor-pointer sm:flex-none ${targetGrade === g ? 'bg-slate-950 text-white shadow' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        {T('Grade', 'ክፍል')} {g}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 3. Stream + ranked CTE (Grades 11-12) */}
+                {targetGrade >= 11 && (
+                  <section aria-labelledby="reg-stream" className="fade-up space-y-5 rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                    <div>
+                      <h4 id="reg-stream" className="mb-3 text-sm font-bold text-slate-900">
+                        <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 text-[11px] text-white">3</span>
+                        {T('Stream', 'የትምህርት ዘርፍ')}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {([
+                          ['Natural Science', 'የተፈጥሮ ሳይንስ', 'English, Biology, Chemistry, Physics, Math, Amharic, Agriculture, IT'],
+                          ['Social Science', 'የማህበራዊ ሳይንስ', 'English, Math, Geography, History, Economics, IT, Citizenship']
+                        ] as const).map(([val, am, subjects]) => (
+                          <button
+                            key={val} type="button" aria-pressed={targetStream === val} onClick={() => setTargetStream(val)}
+                            className={`rounded-xl border-2 p-3.5 text-left transition-all cursor-pointer ${targetStream === val ? 'border-slate-950 bg-white shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                           >
-                            {opt.labelAm}
-                          </div>
-                        </button>
-                      ))}
+                            <span className="flex items-center justify-between">
+                              <span className="text-sm font-bold text-slate-900">{lang === 'am' ? am : val}</span>
+                              <span className={`h-4 w-4 rounded-full border-2 transition-all ${targetStream === val ? 'border-slate-950 bg-slate-950 ring-2 ring-white ring-inset' : 'border-slate-300'}`} />
+                            </span>
+                            <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">{subjects}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-3">
+                        <h4 className="text-sm font-bold text-slate-900">
+                          {T('CTE track: rank all four', 'የCTE ሙያ፡ አራቱንም በቅደም ተከተል ያስቀምጡ')}
+                        </h4>
+                        {cteChoices.length > 0 && (
+                          <button type="button" onClick={() => setCteChoices([])} className="text-xs font-semibold text-slate-500 underline hover:text-slate-800 cursor-pointer">
+                            {T('Start again', 'እንደገና ጀምር')}
+                          </button>
+                        )}
+                      </div>
+                      <p className="mb-3 text-xs leading-relaxed text-slate-500">
+                        {T(
+                          'Tap the tracks in order: first the one you want most, then the next. If a track is full, the student goes to the next choice. Students with higher marks are placed first.',
+                          'በጣም የሚፈልገውን መጀመሪያ፣ ቀጥሎ የሚቀጥለውን ይንኩ። አንዱ ሙሉ ከሆነ ተማሪው ወደ ቀጣዩ ምርጫ ይገባል። ከፍተኛ ውጤት ያላቸው መጀመሪያ ይመደባሉ።'
+                        )}
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {CTE_SPECIALIZATION_OPTIONS.map((opt) => {
+                          const rank = cteChoices.indexOf(opt.labelEn) + 1;
+                          return (
+                            <button
+                              key={opt.id} type="button" aria-pressed={rank > 0} onClick={() => toggleCteChoice(opt.labelEn)}
+                              className={`flex items-center gap-3 rounded-xl border-2 p-3 text-left transition-all cursor-pointer ${rank ? 'border-emerald-600 bg-emerald-50' : 'border-dashed border-slate-300 bg-white hover:border-slate-400'}`}
+                            >
+                              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-mono text-sm font-bold transition-all ${rank ? 'pop bg-emerald-600 text-white' : 'border border-dashed border-slate-300 text-slate-300'}`}>
+                                {rank || '·'}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-bold text-slate-900">{lang === 'am' ? opt.labelAm : opt.labelEn}</span>
+                                <span className="block truncate text-[11px] text-slate-500">
+                                  {rank ? `${rank}${['st', 'nd', 'rd', 'th'][rank - 1]} ${T('choice', 'ምርጫ')}` : lang === 'am' ? opt.labelEn : opt.labelAm}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className={`mt-2 text-xs font-semibold ${cteChoices.length === 4 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                        {cteChoices.length === 4 ? `✓ ${T('All four ranked', 'አራቱም ተቀምጠዋል')}` : `${cteChoices.length} ${T('of 4 ranked', 'ከ4 ተቀምጠዋል')}`}
+                      </p>
+                    </div>
+                  </section>
+                )}
+
+                {/* Details */}
+                <section aria-labelledby="reg-details" className="space-y-4">
+                  <h4 id="reg-details" className="text-sm font-bold text-slate-900">
+                    <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 text-[11px] text-white">{targetGrade >= 11 ? 4 : 3}</span>
+                    {T('Details', 'ዝርዝር መረጃ')}
+                  </h4>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className={labelCls}>{T('Gender', 'ጾታ')}</label>
+                      <select value={gender} onChange={(e) => setGender(e.target.value as 'M' | 'F')} className={inputCls}>
+                        <option value="M">{T('Male', 'ወንድ')}</option>
+                        <option value="F">{T('Female', 'ሴት')}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>{T('Previous school', 'የቀድሞ ትምህርት ቤት')}</label>
+                      <input type="text" value={previousSchool} onChange={(e) => setPreviousSchool(e.target.value)} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>
+                        {targetGrade === 9 ? T('Grade 8 exam result (%)', 'የ8ኛ ክፍል ውጤት (%)') : T('Last year’s average (%)', 'የባለፈው ዓመት አማካይ (%)')}
+                      </label>
+                      <input type="number" step="0.1" min="0" max="100" value={previousScore} onChange={(e) => setPreviousScore(Number(e.target.value))} className={`${inputCls} font-mono`} />
                     </div>
                   </div>
-                </div>
-              )}
+                  {targetGrade >= 11 && (
+                    <p className="-mt-1 text-[11px] text-slate-500">
+                      {T('This mark decides who is placed first when CTE tracks fill up.', 'ይህ ውጤት የCTE ሙያዎች ሲሞሉ ማን መጀመሪያ እንደሚመደብ ይወስናል።')}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className={labelCls}>{T('Guardian name', 'የወላጅ/አሳዳጊ ስም')}</label>
+                      <input type="text" value={guardianName} onChange={(e) => setGuardianName(e.target.value)} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>{T('Guardian phone', 'የወላጅ/አሳዳጊ ስልክ')}</label>
+                      <input type="tel" value={guardianPhone} onChange={(e) => setGuardianPhone(e.target.value)} className={`${inputCls} font-mono`} />
+                    </div>
+                  </div>
+                </section>
 
-              {/* REGISTRATION FORM FIELDS */}
-              <form onSubmit={handleRegisterStudent} className="space-y-4 pt-2">
-                {/* Student identity: the Previous Student Check reads these fields */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label htmlFor="reg-first-name" className="block text-xs font-bold text-slate-700 mb-1">
-                      {lang === 'am' ? 'የተማሪው ስም *' : 'First Name *'}
-                    </label>
-                    <input
-                      id="reg-first-name"
-                      type="text"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="e.g. Yared"
-                      autoComplete="off"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
-                    />
+                {formError && (
+                  <div role="alert" className="fade-up flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {formError}
                   </div>
-                  <div>
-                    <label htmlFor="reg-father-name" className="block text-xs font-bold text-slate-700 mb-1">
-                      {lang === 'am' ? 'የአባት ስም' : 'Father’s Name'}
-                    </label>
-                    <input
-                      id="reg-father-name"
-                      type="text"
-                      value={fatherName}
-                      onChange={(e) => setFatherName(e.target.value)}
-                      placeholder="e.g. Getachew"
-                      autoComplete="off"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reg-grandfather-name" className="block text-xs font-bold text-slate-700 mb-1">
-                      {lang === 'am' ? 'የአያት ስም' : 'Grandfather’s Name'}
-                    </label>
-                    <input
-                      id="reg-grandfather-name"
-                      type="text"
-                      value={grandfatherName}
-                      onChange={(e) => setGrandfatherName(e.target.value)}
-                      placeholder="e.g. Tadesse"
-                      autoComplete="off"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('name')}`}
-                    />
-                  </div>
-                </div>
+                )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="sm:col-span-2">
-                    <label htmlFor="reg-name-am" className="block text-xs font-bold text-slate-700 mb-1">
-                      ሙሉ ስም (በአማርኛ)
-                    </label>
-                    <input
-                      id="reg-name-am"
-                      type="text"
-                      value={fullNameAmharic}
-                      onChange={(e) => setFullNameAmharic(e.target.value)}
-                      placeholder="ለምሳሌ፡ ያሬድ ጌታቸው ታደሰ"
-                      autoComplete="off"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-medium${fillRing('amharic')}`}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reg-dob" className="block text-xs font-bold text-slate-700 mb-1">
-                      {lang === 'am' ? 'የትውልድ ቀን' : 'Date of Birth'}
-                    </label>
-                    <input
-                      id="reg-dob"
-                      type="date"
-                      value={dateOfBirth}
-                      min="1990-01-01"
-                      max={new Date().toISOString().split('T')[0]}
-                      onChange={(e) => setDateOfBirth(e.target.value)}
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-semibold${fillRing('dob')}`}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reg-gender" className="block text-xs font-bold text-slate-700 mb-1">Gender</label>
-                    <select
-                      id="reg-gender"
-                      value={gender}
-                      onChange={(e) => setGender(e.target.value as 'M' | 'F')}
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 cursor-pointer font-semibold${fillRing('gender')}`}
-                    >
-                      <option value="M">Male (ወንድ)</option>
-                      <option value="F">Female (ሴት)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* PREVIOUS STUDENT CHECK: runs in the background while the fields above are filled in */}
-                <PreviousStudentCheck
-                  key={checkSession}
-                  lang={lang}
-                  index={matchIndex}
-                  query={matchQuery}
-                  previousStudentIdInput={previousStudentIdInput}
-                  onPreviousStudentIdChange={setPreviousStudentIdInput}
-                  alreadyRegisteredIds={alreadyRegisteredPreviousIds}
-                  linkedRecord={linkedRecord}
-                  onUse={handleUsePreviousStudent}
-                  onUnlink={handleUnlinkPreviousStudent}
-                />
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Previous School</label>
-                    <input
-                      type="text"
-                      value={previousSchool}
-                      onChange={(e) => setPreviousSchool(e.target.value)}
-                      placeholder="e.g. Debre Berhan Primary"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500${fillRing('school')}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      {targetGrade === 9 ? '8th Gr Ministry Result' : 'Previous Average %'}
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      min="50"
-                      max="100"
-                      value={previousScore}
-                      onChange={(e) => setPreviousScore(Number(e.target.value))}
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500 font-bold${fillRing('score')}`}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Guardian Name</label>
-                    <input
-                      type="text"
-                      value={guardianName}
-                      onChange={(e) => setGuardianName(e.target.value)}
-                      placeholder="e.g. Ato Getachew Tadesse"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-colors duration-500${fillRing('guardianName')}`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Guardian Phone</label>
-                    <input
-                      type="tel"
-                      value={guardianPhone}
-                      onChange={(e) => setGuardianPhone(e.target.value)}
-                      placeholder="+251 91 100 2233"
-                      className={`w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono transition-colors duration-500${fillRing('guardianPhone')}`}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <span className="text-[11px] text-slate-500">
-                    Will be registered under <strong>2017 E.C. Admission Pool</strong>
+                <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
+                  <span className="text-xs text-slate-500">
+                    {T('Admission year', 'የምዝገባ ዓመት')}: <b className="text-slate-700">{SCHOOL_INFO.registrationYear}</b>
                   </span>
-                  <button
-                    type="submit"
-                    className="btn-animated px-5 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-2"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-amber-400" />
-                    <span>{lang === 'am' ? 'ተማሪውን መዝግብ (Register)' : 'Confirm 2017 Registration'}</span>
+                  <button type="submit" className="btn-academic flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white hover:bg-slate-800 cursor-pointer">
+                    <CheckCircle2 className="h-4 w-4 text-amber-300" />
+                    {T('Register student', 'ተማሪውን መዝግብ')}
                   </button>
                 </div>
               </form>
@@ -1306,11 +1243,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                   <h3 className="font-black text-slate-900 text-sm flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-emerald-700" />
                     <span>
-                      {lang === 'am' ? 'የ2017 ዓ.ም. የተመዘገቡ ተማሪዎች' : 'Registered 2017 E.C. Applicants'}
+                      {T('Registered students', 'የተመዘገቡ ተማሪዎች')}
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Grade {targetGrade} Admission Pool ({registeredStudents.filter((s) => s.targetGrade === targetGrade).length} students)
+                    {T('Grade', 'ክፍል')} {targetGrade}: {registeredStudents.filter((s) => s.targetGrade === targetGrade).length} {T('students', 'ተማሪዎች')}
                   </p>
                 </div>
 
@@ -1319,7 +1256,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                   className="px-3 py-1.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-[11px] rounded-xl shadow-sm transition-all cursor-pointer flex items-center gap-1"
                 >
                   <Shuffle className="w-3.5 h-3.5" />
-                  <span>Allocate to Sections →</span>
+                  <span>{T('Place in classes', 'ክፍል መድብ')} →</span>
                 </button>
               </div>
 
@@ -1330,7 +1267,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <UserPlus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">No Grade {targetGrade} Students Enrolled Yet</p>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Use the intake form on the left to enroll the first applicant.
+                      Use the intake form on the left or select a 2018 E.C. candidate above to enroll the first applicant.
                     </p>
                   </div>
                 ) : (
@@ -1414,221 +1351,214 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 onClick={() => setActiveTab('timetable')}
                 className="px-3 py-1.5 bg-emerald-800 text-white rounded-xl font-black text-xs hover:bg-emerald-900 cursor-pointer flex-shrink-0 flex items-center gap-1"
               >
-                <span>Assign Timetable & Teachers →</span>
+                <span>{T('Next: timetable and teachers →', 'ቀጣይ፡ የጊዜ ሰሌዳና መምህራን →')}</span>
               </button>
             </div>
           )}
 
-          {/* Allocation Controls Card */}
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          {/* Allocation controls: academic classes or CTE tracks */}
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-5">
               <div>
-                <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
-                  <Shuffle className="w-5 h-5 text-emerald-700" />
-                  <span>
-                    {lang === 'am'
-                      ? 'የተማሪዎችን ወደ ክፍሎች በዘፈቀደና በፆታ ማመጣጠኛ ኢንጂን'
-                      : 'Automated / Random & Balanced Section Allocation Engine'}
-                  </span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Distribute the {registeredStudents.filter((s) => s.targetGrade === allocationGrade).length}{' '}
-                  registered students of Grade {allocationGrade} into sections (A, B, C...)
+                <h3 className="font-display text-lg font-bold text-slate-900">{T('Place students in classes', 'ተማሪዎችን ወደ ክፍል መድብ')}</h3>
+                <p className="text-xs text-slate-500">
+                  {T('Choose what to place, check the settings, then preview before you save.', 'የሚመደበውን ይምረጡ፣ ቅንብሩን ያረጋግጡ፣ ከማስቀመጥዎ በፊት ቅድመ እይታ ይመልከቱ።')}
                 </p>
               </div>
-
-              {/* Grade & Stream Selector for Allocation */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-500">Grade:</span>
-                  <select
-                    value={allocationGrade}
-                    onChange={(e) => {
-                      setAllocationGrade(Number(e.target.value));
+              <div className="inline-flex rounded-full bg-slate-100 p-1 text-xs font-bold" role="tablist">
+                {([['academic', T('Academic classes', 'መደበኛ ክፍሎች')], ['cte', T('CTE tracks (Grades 11–12)', 'የCTE ሙያዎች (11–12)')]] as const).map(([k, label]) => (
+                  <button
+                    key={k} role="tab" aria-selected={allocationKind === k}
+                    onClick={() => {
+                      setAllocationKind(k);
+                      if (k === 'cte' && allocationGrade < 11) setAllocationGrade(11);
                       setPreviewBuckets(null);
+                      setCteUnplaced([]);
+                      setAllocationNotice('');
                     }}
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-black text-slate-800 cursor-pointer focus:ring-2 focus:ring-emerald-500"
+                    className={`rounded-full px-4 py-2 transition-colors cursor-pointer ${allocationKind === k ? 'bg-slate-950 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
-                    <option value={9}>Grade 9</option>
-                    <option value={10}>Grade 10</option>
-                    <option value={11}>Grade 11</option>
-                    <option value={12}>Grade 12</option>
-                  </select>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </header>
+
+            <div className="space-y-6 p-6">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-500">{T('Grade', 'ክፍል')}</span>
+                  <div className="inline-flex gap-1 rounded-xl bg-slate-100 p-1" role="radiogroup">
+                    {(allocationKind === 'cte' ? [11, 12] : [9, 10, 11, 12]).map((g) => (
+                      <button
+                        key={g} role="radio" aria-checked={allocationGrade === g}
+                        onClick={() => { setAllocationGrade(g); setPreviewBuckets(null); setCteUnplaced([]); setAllocationNotice(''); }}
+                        className={`rounded-lg px-4 py-1.5 text-sm font-bold transition-all cursor-pointer ${allocationGrade === g ? 'bg-slate-950 text-white shadow' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {allocationGrade >= 11 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-slate-500">Stream:</span>
-                    <div className="flex bg-slate-200 p-0.5 rounded-xl text-xs font-bold">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAllocationStream('Natural Science');
-                          setPreviewBuckets(null);
-                        }}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                          allocationStream === 'Natural Science'
-                            ? 'bg-emerald-800 text-white shadow-2xs'
-                            : 'text-slate-700 hover:text-slate-900'
-                        }`}
-                      >
-                        🧪 Natural
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAllocationStream('Social Science');
-                          setPreviewBuckets(null);
-                        }}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                          allocationStream === 'Social Science'
-                            ? 'bg-amber-800 text-white shadow-2xs'
-                            : 'text-slate-700 hover:text-slate-900'
-                        }`}
-                      >
-                        📜 Social
-                      </button>
+                {allocationKind === 'academic' && allocationGrade >= 11 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-500">{T('Stream', 'ዘርፍ')}</span>
+                    <div className="inline-flex gap-1 rounded-xl bg-slate-100 p-1" role="radiogroup">
+                      {([['Natural Science', T('Natural Science', 'የተፈጥሮ ሳይንስ')], ['Social Science', T('Social Science', 'የማህበራዊ ሳይንስ')]] as const).map(([k, label]) => (
+                        <button
+                          key={k} role="radio" aria-checked={allocationStream === k}
+                          onClick={() => { setAllocationStream(k); setPreviewBuckets(null); }}
+                          className={`rounded-lg px-3.5 py-1.5 text-sm font-bold transition-all cursor-pointer ${allocationStream === k ? 'bg-slate-950 text-white shadow' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
-              </div>
-            </div>
 
-            {/* Config Inputs: How many students in each section, Mode, etc. */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              {/* Method choice */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Section Sizing Method:
-                </label>
-                <div className="flex rounded-xl bg-slate-200 p-1 text-xs font-bold">
-                  <button
-                    type="button"
-                    onClick={() => setAllocationMethod('by-size')}
-                    className={`flex-1 py-1.5 rounded-lg transition-all ${
-                      allocationMethod === 'by-size'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600'
-                    }`}
-                  >
-                    Students per Section
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAllocationMethod('by-count')}
-                    className={`flex-1 py-1.5 rounded-lg transition-all ${
-                      allocationMethod === 'by-count'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600'
-                    }`}
-                  >
-                    Fixed Section Count
-                  </button>
+                <span className="text-xs text-slate-500">
+                  <b className="font-mono text-slate-900">
+                    {registeredStudents.filter((r) => r.targetGrade === allocationGrade && (allocationKind === 'cte' || allocationGrade < 11 || r.stream === allocationStream)).length}
+                  </b>{' '}
+                  {T('registered students', 'የተመዘገቡ ተማሪዎች')}
+                </span>
+              </div>
+
+              {allocationKind === 'academic' ? (
+                <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+                  <div>
+                    <span className={labelCls}>{T('Split classes by', 'ክፍሎችን የሚከፋፈሉት በ')}</span>
+                    <div className="mb-2 inline-flex w-full gap-1 rounded-xl bg-white p-1 ring-1 ring-slate-200">
+                      {([['by-size', T('Class size', 'የክፍል ብዛት')], ['by-count', T('Number of classes', 'የክፍሎች ቁጥር')]] as const).map(([k, label]) => (
+                        <button key={k} onClick={() => setAllocationMethod(k)} className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition-all cursor-pointer ${allocationMethod === k ? 'bg-slate-950 text-white' : 'text-slate-600 hover:text-slate-900'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {allocationMethod === 'by-size' ? (
+                      <input type="number" min={1} value={studentsPerSection} onChange={(e) => setStudentsPerSection(Math.max(1, Number(e.target.value) || 1))} className={`${inputCls} font-mono`} aria-label="Students per class" />
+                    ) : (
+                      <input type="number" min={1} value={numSectionsInput} onChange={(e) => setNumSectionsInput(Math.max(1, Number(e.target.value) || 1))} className={`${inputCls} font-mono`} aria-label="Number of classes" />
+                    )}
+                    <span className="mt-1 block text-[11px] text-slate-500">
+                      {allocationMethod === 'by-size' ? T('students in each class', 'በእያንዳንዱ ክፍል ያሉ ተማሪዎች') : T('classes to create', 'የሚፈጠሩ ክፍሎች')}
+                    </span>
+                  </div>
+                  <div>
+                    <label className={labelCls}>{T('How to mix students', 'ተማሪዎችን የማደባለቅ ዘዴ')}</label>
+                    <select value={allocationMode} onChange={(e) => setAllocationMode(e.target.value as any)} className={inputCls}>
+                      <option value="combined-smart">{T('Balanced: marks and gender (recommended)', 'ሚዛናዊ፡ ውጤትና ጾታ (የሚመከር)')}</option>
+                      <option value="gender-balanced">{T('Equal boys and girls', 'እኩል ወንድና ሴት')}</option>
+                      <option value="merit-balanced">{T('Even spread of marks', 'እኩል የውጤት ስርጭት')}</option>
+                      <option value="random">{T('Random draw', 'በዕጣ')}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>{T('Seats per classroom', 'በአንድ ክፍል የመቀመጫ ብዛት')}</label>
+                    <input type="number" min={1} value={targetCapacity} onChange={(e) => setTargetCapacity(Math.max(1, Number(e.target.value) || 1))} className={`${inputCls} font-mono`} />
+                    <span className="mt-1 block text-[11px] text-slate-500">{T('Used to warn you about full rooms', 'ሙሉ ክፍሎችን ለማስጠንቀቅ')}</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs leading-relaxed text-slate-500">
+                    {T(
+                      'Students with the highest marks choose first. Each one gets their best-ranked track that still has a free seat. Set how many seats each track has.',
+                      'ከፍተኛ ውጤት ያላቸው መጀመሪያ ይመርጣሉ። እያንዳንዱ ተማሪ ባዶ መቀመጫ ያለው ከፍተኛ ደረጃ የሰጠውን ሙያ ያገኛል። ለእያንዳንዱ ሙያ የመቀመጫ ብዛት ያስቀምጡ።'
+                    )}
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {CTE_SPECIALIZATION_OPTIONS.map((o) => {
+                      const firstChoice = registeredStudents.filter((r) => r.targetGrade === allocationGrade && choicesOf(r)[0] === o.labelEn).length;
+                      return (
+                        <div key={o.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-slate-900">{lang === 'am' ? o.labelAm : o.labelEn}</div>
+                            <div className="text-[11px] text-slate-500">
+                              <b className="font-mono text-slate-700">{firstChoice}</b> {T('chose it first', 'በመጀመሪያ ምርጫ መርጠዋል')}
+                            </div>
+                          </div>
+                          <label className="shrink-0 text-right">
+                            <span className="block text-[11px] font-semibold text-slate-500">{T('Seats', 'መቀመጫ')}</span>
+                            <input
+                              type="number" min={1} value={cteCapacities[o.labelEn] ?? 40}
+                              onChange={(e) => setCteCapacities((prev) => ({ ...prev, [o.labelEn]: Math.max(1, Number(e.target.value) || 1) }))}
+                              className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-center font-mono text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
-              {/* Number Input */}
-              <div>
-                {allocationMethod === 'by-size' ? (
-                  <>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      How many students in each section?
-                    </label>
-                    <input
-                      type="number"
-                      min="2"
-                      max="60"
-                      value={studentsPerSection}
-                      onChange={(e) => setStudentsPerSection(Math.max(1, Number(e.target.value)))}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-black text-slate-900 focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      Standard Ethiopian MoE guideline: 35–45 students per section
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      How many sections to generate?
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={numSectionsInput}
-                      onChange={(e) => setNumSectionsInput(Math.max(1, Number(e.target.value)))}
-                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-black text-slate-900 focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      Generates Section A, B, C...
-                    </span>
-                  </>
-                )}
-              </div>
+              {allocationNotice && (
+                <div role="alert" className="fade-up flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {allocationNotice}
+                </div>
+              )}
 
-              {/* Allocation Strategy */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Distribution Algorithm Mode:
-                </label>
-                <select
-                  value={allocationMode}
-                  onChange={(e) => setAllocationMode(e.target.value as any)}
-                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 cursor-pointer focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="combined-smart">⚖️ + 📊 Combined Smart: Gender Parity (50/50) + Merit Stratification (Recommended)</option>
-                  <option value="gender-balanced">⚖️ Gender-Balanced (50% M / 50% F)</option>
-                  <option value="merit-balanced">📊 Academic Merit-Balanced (Snake Draft by Score)</option>
-                  <option value="random">🎲 Random Shuffle (በዘፈቀደ/በእጣ)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Target Capacity & Section Controls Row */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200/80">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-700">Classroom Max Capacity:</span>
-                <input
-                  type="number"
-                  min="20"
-                  max="65"
-                  value={targetCapacity}
-                  onChange={(e) => setTargetCapacity(Math.max(10, Number(e.target.value)))}
-                  className="w-20 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-black text-slate-900 focus:ring-2 focus:ring-emerald-500 text-center"
-                />
-                <span className="text-[11px] text-slate-500">students / section</span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {allocationGrade >= 11 && (
-                  <button
-                    type="button"
-                    onClick={handleGenerateCteSections}
-                    className="btn-animated px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-black rounded-xl shadow-sm cursor-pointer flex items-center gap-1.5"
-                    title="Group Grade 11 & 12 students into specialized CTE vocational sections (Web Dev, Marketing, Accounting, Construction)"
-                  >
-                    <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>
-                      {lang === 'am'
-                        ? 'የCTE ሙያ ክፍሎች ድልድል (CTE Cohorts)'
-                        : `Generate Grade ${allocationGrade} CTE Sections`}
-                    </span>
-                  </button>
-                )}
-
+              <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={handleGenerateAllocation}
-                  className="btn-animated px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-black rounded-xl shadow-sm cursor-pointer flex items-center gap-2"
+                  onClick={allocationKind === 'cte' ? handleGenerateCteSections : handleGenerateAllocation}
+                  className="btn-academic flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white hover:bg-slate-800 cursor-pointer"
                 >
-                  <Shuffle className="w-4 h-4 text-amber-400" />
-                  <span>
-                    {lang === 'am' ? 'መደበኛ ክፍሎችን አዘጋጅ (Generate Homerooms)' : 'Generate & Preview Balanced Sections'}
-                  </span>
+                  {allocationKind === 'cte' ? <Sparkles className="h-4 w-4 text-amber-300" /> : <Shuffle className="h-4 w-4 text-amber-300" />}
+                  {allocationKind === 'cte' ? T('Place students by marks', 'ተማሪዎችን በውጤት መድብ') : T('Preview classes', 'ክፍሎችን ቅድመ እይታ')}
                 </button>
               </div>
             </div>
           </div>
+
+          {/* CTE results: who got which choice, and who is left without a seat */}
+          {allocationKind === 'cte' && (previewBuckets || cteUnplaced.length > 0) && (
+            <div className="fade-up space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="mr-2 font-display text-base font-bold text-slate-900">{T('How the choices worked out', 'ምርጫዎቹ እንዴት ተሳኩ')}</h4>
+                {cteRankCounts.map((n, i) => (
+                  <span key={i} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {i + 1}{['st', 'nd', 'rd', 'th'][i]} {T('choice', 'ምርጫ')}: <b className="font-mono">{n}</b>
+                  </span>
+                ))}
+              </div>
+              {cteUnplaced.length > 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="mb-3 flex items-start gap-2 text-sm font-semibold text-amber-900">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    {T(
+                      `${cteUnplaced.length} student(s) have no seat: every track they chose is full. Raise a track's seats above, or place them by hand.`,
+                      `${cteUnplaced.length} ተማሪ(ዎች) መቀመጫ አላገኙም፡ የመረጧቸው ሙያዎች በሙሉ ሞልተዋል። የመቀመጫ ብዛት ይጨምሩ ወይም በእጅ ይመድቧቸው።`
+                    )}
+                  </p>
+                  <ul className="space-y-2">
+                    {cteUnplaced.map((u) => (
+                      <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                        <span className="min-w-0">
+                          <span className="font-semibold text-slate-900">{u.fullName}</span>
+                          <span className="ml-2 font-mono text-xs text-slate-500">{u.previousAverageScore ?? 0}%</span>
+                        </span>
+                        <select
+                          defaultValue="" aria-label={`Place ${u.fullName}`}
+                          onChange={(e) => e.target.value && handlePlaceUnplaced(u.id, e.target.value)}
+                          className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold cursor-pointer"
+                        >
+                          <option value="">{T('Place in…', 'መድብ ወደ…')}</option>
+                          {CTE_SPECIALIZATION_OPTIONS.map((o) => (
+                            <option key={o.id} value={o.labelEn}>{o.labelEn}</option>
+                          ))}
+                        </select>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* PREVIEW SECTIONS GRID */}
           {previewBuckets && previewBuckets.length > 0 && (
@@ -1636,13 +1566,13 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
                 <div>
                   <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
-                    <span>Generated Allocation Preview ({previewBuckets.length} Sections)</span>
+                    <span>{T('Preview', 'ቅድመ እይታ')}: {previewBuckets.length} {T('classes', 'ክፍሎች')}</span>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                       {allocationMode === 'combined-smart' ? 'Gender & Merit Optimized' : allocationMode}
                     </span>
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Review and fine-tune section rosters. You can move any student between sections with the Transfer dropdown.
+                    Check each class. Use “Move” to put a student in a different class before you save.
                   </p>
                 </div>
 
@@ -1653,7 +1583,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition-colors"
                   >
                     <Download className="w-4 h-4 text-amber-400" />
-                    <span>Export Rosters (CSV)</span>
+                    <span>{T('Download rosters', 'ዝርዝሮችን አውርድ')}</span>
                   </button>
 
                   {hasCommittedCurrentPreview ? (
@@ -1663,7 +1593,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5 transition-all"
                     >
                       <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                      <span>{lang === 'am' ? '✓ ክፍሎች ተመዝግበዋል (ዝርዝር እይ)' : '✓ Sections Committed (View Details)'}</span>
+                      <span>{lang === 'am' ? '✓ ክፍሎች ተመዝግበዋል (ዝርዝር እይ)' : '✓ Saved (view details)'}</span>
                     </button>
                   ) : (
                     <button
@@ -1672,7 +1602,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                       className="btn-animated px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
                     >
                       <CheckCircle2 className="w-4 h-4 text-emerald-950" />
-                      <span>{lang === 'am' ? 'ክፍሎችን አፅድቅና መዝግብ' : 'Confirm & Commit 2017 Sections'}</span>
+                      <span>{lang === 'am' ? 'ክፍሎችን አፅድቅና መዝግብ' : 'Save these classes'}</span>
                     </button>
                   )}
                 </div>
@@ -1705,12 +1635,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                             </span>
                             <div>
                               <div className="font-extrabold text-slate-900 text-sm">
-                                Grade {allocationGrade} Section {bucket.sectionLetter}
+                                {bucket.isCteSection ? <>Grade {allocationGrade} · {bucket.cteSpecialization}</> : <>Grade {allocationGrade} Section {bucket.sectionLetter}</>}
                               </div>
                               <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
                                 <span>{bucket.roomNumber || 'Classroom 101'}</span>
                                 <span>•</span>
-                                <span>Capacity: {bucket.maxCapacity || targetCapacity}</span>
+                                <span className={isOverCapacity ? 'font-bold text-rose-600' : ''}>{bucket.students.length}/{bucket.maxCapacity || targetCapacity} seats{isOverCapacity ? ' (over the limit)' : ''}</span>
                               </div>
                             </div>
                           </div>
@@ -1769,11 +1699,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                                   <span>{st.gender === 'F' ? 'Female' : 'Male'}</span>
                                   <span>•</span>
                                   <span className="font-bold text-amber-700">{st.previousAverageScore}%</span>
-                                  {st.cteSpecialization && (
+                                  {(bucket.isCteSection ? st.cteSpecialization : st.cteSection && st.cteSpecialization) && (
                                     <>
                                       <span>•</span>
                                       <span className="font-bold text-purple-700 bg-purple-50 px-1 py-0.2 rounded border border-purple-200">
-                                        CTE: {st.cteSpecialization}
+                                        {bucket.isCteSection ? (st.cteRank ? `${st.cteRank}${['st', 'nd', 'rd', 'th'][Math.min(st.cteRank, 4) - 1]} choice` : 'Placed by hand') : `CTE: ${st.cteSpecialization}`}
                                       </span>
                                     </>
                                   )}
@@ -1783,7 +1713,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
                             {/* Section Transfer Control */}
                             <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
-                              <span className="text-[10px] text-slate-400">Move:</span>
+                              <span className="text-[10px] text-slate-400">{T('Move', 'አንቀሳቅስ')}:</span>
                               <select
                                 value={bucket.sectionCode}
                                 onChange={(e) => handleMoveStudent(st.id, e.target.value)}
@@ -2111,7 +2041,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                    2017 E.C. Academic Registry
+                    2019 E.C. Academic Registry
                   </span>
                   <h3 className="text-xl font-black text-white mt-1">
                     {lang === 'am' ? 'ክፍሎች በተሳካ ሁኔታ ተመዝግበዋል!' : 'Sections Successfully Committed!'}
@@ -2125,7 +2055,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900 text-xs leading-relaxed space-y-2">
                 <p className="font-bold">
                   {lang === 'am'
-                    ? `የ2017 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
+                    ? `የ2019 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
                     : `Successfully recorded ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} sections (${(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).join(', ')}) into the school active roster.`}
                 </p>
                 <p className="text-emerald-700 text-[11px]">

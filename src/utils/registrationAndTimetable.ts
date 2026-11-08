@@ -9,7 +9,6 @@ export interface ArchiveStudent {
   fullName: string;
   fullNameAmharic: string;
   gender: 'M' | 'F';
-  dateOfBirth?: string; // ISO date (YYYY-MM-DD), used to confirm previous-year matches
   previousGrade: number; // e.g. 8 (feeder school), 9, 10, 11
   previousSection: string; // e.g. '8B', '9A', '10C'
   previousSchool: string; // e.g. 'Debre Berhan Primary School'
@@ -27,8 +26,6 @@ export interface RegisteredStudent2019 {
   fullName: string;
   fullNameAmharic: string;
   gender: 'M' | 'F';
-  dateOfBirth?: string; // ISO date (YYYY-MM-DD)
-  previousStudentId?: string; // Student ID of the confirmed previous-year record, if any
   targetGrade: number; // 9, 10, 11, 12
   stream?: 'Natural Science' | 'Social Science';
   cteSpecialization?: 'Web Design and Development' | 'Marketing' | 'Accounting' | 'Construction' | string;
@@ -41,7 +38,13 @@ export interface RegisteredStudent2019 {
   guardianPhone: string;
   conduct: 'A' | 'B' | 'C' | 'D';
   registrationDate: string;
-  allocatedSection?: string; // e.g. '9A', '9B' or undefined if pending
+  allocatedSection?: string; // academic section, e.g. '9A', '9B' or undefined if pending
+  /** CTE track preferences, best first (Grades 11-12). All four tracks are ranked at registration. */
+  cteChoices?: string[];
+  /** Which preference was granted (1 = first choice). Set by the CTE allocation. */
+  cteRank?: number;
+  /** CTE group the student was placed in, e.g. '11-CTE-WD'. Separate from allocatedSection. */
+  cteSection?: string;
   avatar: string;
 }
 
