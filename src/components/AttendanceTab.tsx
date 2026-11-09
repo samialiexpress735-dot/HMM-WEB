@@ -39,7 +39,12 @@ export const AttendanceTab: React.FC<Props> = ({ students, section, att }) => {
   const [mode, setMode] = useState<'roll' | 'history'>('roll');
   const [date, setDate] = useState<string>(() => (isSchoolDay(today) ? today : shiftSchoolDay(today, -1)));
   const lastDay = isSchoolDay(today) ? today : shiftSchoolDay(today, -1);
-  const days = useMemo(() => recentSchoolDays(20, today), [today]);
+  const days = useMemo(() => recentSchoolDays(20, today), [today]); // used by CSV export
+  // History grid: sized so every day fits on screen with no scrolling
+  const [histCount, setHistCount] = useState<number>(() =>
+    typeof window === 'undefined' ? 20 : window.innerWidth < 640 ? 7 : window.innerWidth < 1024 ? 14 : 20
+  );
+  const histDays = useMemo(() => recentSchoolDays(histCount, today), [histCount, today]);
 
   const cur = (id: string, d = date) => map[id]?.[d]?.status;
   const counts = useMemo(() => {
@@ -184,69 +189,85 @@ export const AttendanceTab: React.FC<Props> = ({ students, section, att }) => {
         </>
       ) : (
         <>
-          <p className="px-5 py-2 text-[11px] text-slate-500 bg-slate-50 border-b border-slate-200">
-            Last {days.length} school days. Click a cell to change it: blank → Present → Late → Permission → Absent.
-          </p>
-          <div className="overflow-auto max-h-[72vh]">
-            <table className="w-full text-xs border-separate border-spacing-0">
-              <thead>
-                <tr>
-                  <th className="sticky top-0 left-0 z-30 bg-slate-100 border-b border-slate-200 text-left py-3 px-4 min-w-[210px] font-semibold text-slate-600">Student</th>
-                  {days.map((d) => {
-                    const f = fmtShort(d);
-                    const present = students.filter((s) => ['Present', 'Late'].includes(cur(s.id, d) || '')).length;
-                    const taken = students.filter((s) => cur(s.id, d)).length;
-                    return (
-                      <th key={d} className={`sticky top-0 z-20 border-b border-slate-200 px-1 py-2 text-center min-w-[40px] ${d === today ? 'bg-emerald-100' : 'bg-slate-100'}`} title={fmtLong(d)}>
-                        <div className="text-[10px] text-slate-500 font-medium">{f.wd}</div>
-                        <div className="font-mono font-bold text-slate-900">{f.day}</div>
-                        <div className="text-[9px] text-slate-400 font-mono">{taken ? `${Math.round((present / taken) * 100)}%` : '–'}</div>
-                      </th>
-                    );
-                  })}
-                  <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 px-3 text-center font-semibold text-slate-600 min-w-[64px]">Rate</th>
-                  <th className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 px-3 text-center font-semibold text-slate-600 min-w-[64px]">Absent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((s) => {
-                  const per = days.map((d) => cur(s.id, d));
-                  const taken = per.filter(Boolean).length;
-                  const attended = per.filter((x) => x === 'Present' || x === 'Late').length;
-                  const absent = per.filter((x) => x === 'Absent').length;
-                  const rate = taken ? Math.round((attended / taken) * 100) : null;
+          <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-slate-500">
+              Tap a cell to change it: blank → P → L → E → A. Tap a date to open that day.
+            </p>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-slate-500 font-semibold">Show</span>
+              <div className="inline-flex rounded-full bg-slate-200 p-0.5 font-bold">
+                {[7, 14, 20].map((n) => (
+                  <button key={n} onClick={() => setHistCount(n)} className={`px-2.5 py-0.5 rounded-full cursor-pointer ${histCount === n ? 'bg-slate-950 text-white' : 'text-slate-600'}`}>{n}</button>
+                ))}
+              </div>
+              <span className="text-slate-500">days</span>
+              <span className="hidden sm:inline text-slate-400">· P present · L late · E permission · A absent</span>
+            </div>
+          </div>
+          <table className="w-full table-fixed text-xs border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <th className="bg-slate-100 border-b border-slate-200 text-left py-2 px-2 sm:px-3 w-[34%] sm:w-[22%] font-semibold text-slate-600">Student</th>
+                {histDays.map((d) => {
+                  const f = fmtShort(d);
+                  const present = students.filter((s) => ['Present', 'Late'].includes(cur(s.id, d) || '')).length;
+                  const taken = students.filter((s) => cur(s.id, d)).length;
                   return (
-                    <tr key={s.id} className="group">
-                      <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-b border-slate-100 py-2 px-4">
-                        <div className="font-semibold text-slate-900">{s.fullName}</div>
-                        <div className="text-[11px] text-slate-500 font-mono">{s.studentId}</div>
-                      </td>
-                      {days.map((d, i) => {
-                        const st = per[i];
-                        const note = map[s.id]?.[d]?.note;
-                        return (
-                          <td key={d} className="border-b border-slate-100 group-hover:bg-slate-50 p-1 text-center">
-                            <button
-                              onClick={() => setStatus(s.id, d, CYCLE[(CYCLE.indexOf(st) + 1) % CYCLE.length] || 'Present')}
-                              aria-label={`${s.fullName}, ${fmtLong(d)}: ${st || 'not marked'}`}
-                              title={`${fmtLong(d)}: ${st || 'not marked'}${note ? ` (${note})` : ''}`}
-                              className={`w-8 h-8 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${st ? meta(st).chip : 'border border-dashed border-slate-200 text-slate-300 hover:border-slate-400'}`}
-                            >
-                              {st ? meta(st).short : '·'}
-                            </button>
-                          </td>
-                        );
-                      })}
-                      <td className="border-b border-slate-100 group-hover:bg-slate-50 px-3 text-center font-mono font-bold">
-                        <span className={rate === null ? 'text-slate-300' : rate >= 90 ? 'text-emerald-700' : rate >= 75 ? 'text-slate-900' : 'text-rose-700'}>{rate === null ? '–' : `${rate}%`}</span>
-                      </td>
-                      <td className="border-b border-slate-100 group-hover:bg-slate-50 px-3 text-center font-mono">{absent || <span className="text-slate-300">0</span>}</td>
-                    </tr>
+                    <th key={d} className={`border-b border-slate-200 p-0 text-center ${d === today ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                      <button
+                        onClick={() => { setDate(d); setMode('roll'); }}
+                        title={`${fmtLong(d)}: open this day`} aria-label={`Open ${fmtLong(d)}`}
+                        className="w-full py-1.5 cursor-pointer hover:bg-emerald-200/60"
+                      >
+                        <div className="text-[9px] text-slate-500 font-medium">{f.wd}</div>
+                        <div className="font-mono font-bold text-slate-900 text-[11px]">{f.day}</div>
+                        <div className="text-[8px] text-slate-400 font-mono">{taken ? `${Math.round((present / taken) * 100)}%` : '–'}</div>
+                      </button>
+                    </th>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+                <th className="bg-slate-100 border-b border-slate-200 px-1 text-center font-semibold text-slate-600 w-[8%]">Rate</th>
+                <th className="bg-slate-100 border-b border-slate-200 px-1 text-center font-semibold text-slate-600 w-[6%]">A</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s) => {
+                const per = histDays.map((d) => cur(s.id, d));
+                const taken = per.filter(Boolean).length;
+                const attended = per.filter((x) => x === 'Present' || x === 'Late').length;
+                const absent = per.filter((x) => x === 'Absent').length;
+                const rate = taken ? Math.round((attended / taken) * 100) : null;
+                return (
+                  <tr key={s.id} className="group">
+                    <td className="bg-white group-hover:bg-slate-50 border-b border-slate-100 py-1 px-2 sm:px-3">
+                      <div className="font-semibold text-slate-900 truncate">{s.fullName}</div>
+                      <div className="text-[10px] text-slate-400 font-mono truncate">{s.studentId}</div>
+                    </td>
+                    {histDays.map((d, i) => {
+                      const st = per[i];
+                      const note = map[s.id]?.[d]?.note;
+                      return (
+                        <td key={d} className="border-b border-slate-100 group-hover:bg-slate-50 p-px text-center">
+                          <button
+                            onClick={() => setStatus(s.id, d, CYCLE[(CYCLE.indexOf(st) + 1) % CYCLE.length] || 'Present')}
+                            aria-label={`${s.fullName}, ${fmtLong(d)}: ${st || 'not marked'}`}
+                            title={`${fmtLong(d)}: ${st || 'not marked'}${note ? ` (${note})` : ''}`}
+                            className={`w-full h-7 rounded text-[11px] font-bold cursor-pointer transition-colors ${st ? meta(st).chip : 'border border-dashed border-slate-200 text-slate-300 hover:border-slate-400'}`}
+                          >
+                            {st ? meta(st).short : '·'}
+                          </button>
+                        </td>
+                      );
+                    })}
+                    <td className="border-b border-slate-100 group-hover:bg-slate-50 px-1 text-center font-mono font-bold">
+                      <span className={rate === null ? 'text-slate-300' : rate >= 90 ? 'text-emerald-700' : rate >= 75 ? 'text-slate-900' : 'text-rose-700'}>{rate === null ? '–' : `${rate}%`}</span>
+                    </td>
+                    <td className="border-b border-slate-100 group-hover:bg-slate-50 px-1 text-center font-mono">{absent || <span className="text-slate-300">0</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </>
       )}
     </div>
