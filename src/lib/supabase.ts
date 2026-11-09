@@ -7,6 +7,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { RegisteredStudent2019, TimetableSlot } from '../utils/registrationAndTimetable';
 import { GradeSection, Teacher, Student } from '../data/schoolData';
 import { AdminUser } from '../components/AdminSignupPage';
+import { academicYearShort, currentEcLabel, todayISO } from '../utils/ethiopianCalendar';
 
 export function getSupabaseCredentials(): { url: string; key: string } {
   let url =
@@ -342,7 +343,7 @@ export async function authenticateAdminFromCloud(
               phone: matched.phone || '+251 91 142 5566',
               roleTitle: matched.role_title || 'Principal & School Director',
               adminId: `DIR-HMM-${matched.id?.slice(0, 4) || '101'}`,
-              dateRegistered: matched.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]
+              dateRegistered: matched.created_at?.split('T')[0] || todayISO()
             }
           };
         }
@@ -364,7 +365,7 @@ export async function authenticateAdminFromCloud(
             phone: u.phone || '+251 91 142 5566',
             roleTitle: 'Principal & School Director',
             adminId: `DIR-${u.id.slice(0, 6)}`,
-            dateRegistered: new Date().toISOString().split('T')[0]
+            dateRegistered: todayISO()
           }
         };
       }
@@ -595,7 +596,7 @@ export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent20
       gender: r.gender,
       targetGrade: r.target_grade,
       stream: r.stream,
-      academicYear: r.academic_year || '2019 E.C.',
+      academicYear: r.academic_year || currentEcLabel(),
       previousSchool: r.previous_school,
       previousGrade: r.previous_grade,
       previousAverageScore: Number(r.previous_score || 0),
@@ -766,7 +767,7 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         grade: Number(s.grade),
         section: s.section,
         stream: s.stream,
-        academicYear: s.academic_year || '2024/2025 (2017 ዓ.ም.)',
+        academicYear: s.academic_year || academicYearShort(undefined, 'am'),
         rank: Number(s.rank || 1),
         totalStudentsInSection: Number(s.total_students_in_section || 40),
         attendanceRate: Number(s.attendance_rate || 95),

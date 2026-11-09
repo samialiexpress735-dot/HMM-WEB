@@ -19,6 +19,8 @@ import {
 import { SchoolAnnouncement, SchoolEvent } from '../data/schoolData';
 import { isSupabaseConfigured } from '../lib/supabase';
 import heroImg from '../assets/images/hero_school_campus_1793721839286.jpg';
+import { currentEcLabel } from '../utils/ethiopianCalendar';
+import { DualDate } from './DualDate';
 
 interface HeroBannerProps {
   onNavigate: (tab: string) => void;
@@ -199,12 +201,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 group-hover:text-amber-700 transition-colors">
-                  {lang === 'am' ? 'ሬጅስትራር እና አስተዳደር (2017 ዓ.ም.)' : 'Registrar & Intake Office (2017 E.C.)'}
+                  {lang === 'am' ? `ሬጅስትራር እና አስተዳደር (${currentEcLabel('am')})` : `Registrar & Intake Office (${currentEcLabel('en')})`}
                 </h3>
                 <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
                   {lang === 'am'
-                    ? 'የ2017 ዓ.ም. የተማሪዎች ምዝገባ፣ የተመጣጠነ የክፍል ድልድል እና የክፍለ-ጊዜ መደራረብ መከላከያ'
-                    : '2017 E.C. admission autocompletion, automated gender/merit-balanced section allocation, and timetable clash detection.'}
+                    ? `የ${currentEcLabel('am')} የተማሪዎች ምዝገባ፣ የተመጣጠነ የክፍል ድልድል እና የክፍለ-ጊዜ መደራረብ መከላከያ`
+                    : `${currentEcLabel('en')} admission autocompletion, automated gender/merit-balanced section allocation, and timetable clash detection.`}
                 </p>
               </div>
             </div>
@@ -400,7 +402,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                   <div key={a.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
                     <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
                       <span className="font-semibold text-emerald-800">{a.category || 'School Bulletin'}</span>
-                      <span className="font-mono tabular-nums">{a.date}</span>
+                      <DualDate date={a.date} lang={lang} className="font-mono tabular-nums" />
                     </div>
                     <div className="text-xs font-bold text-slate-900">{lang === 'am' ? (a.titleAmharic || a.title) : a.title}</div>
                     <p className="text-xs text-slate-600 mt-1 line-clamp-2">{lang === 'am' ? (a.summaryAmharic || a.summary) : a.summary}</p>

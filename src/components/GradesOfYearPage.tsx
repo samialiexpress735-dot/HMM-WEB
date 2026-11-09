@@ -35,6 +35,7 @@ import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../dat
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
 import { getStudentsForSection as getStudentsForSectionUtil } from '../utils/sectionUtils';
 import { getSectionCapacity } from '../utils/sectionCapacity';
+import { currentEcLabel } from '../utils/ethiopianCalendar';
 
 interface GradesOfYearPageProps {
   sections: GradeSection[];
@@ -328,7 +329,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               className="btn-animated min-w-0 flex-1 sm:flex-none justify-center px-3.5 py-2.5 sm:py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-950 shrink-0" />
-              <span className="truncate">{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : 'Registrar →'}</span>
+              <span className="truncate">{lang === 'am' ? `ምዝገባ (${currentEcLabel('am')}) →` : 'Registrar →'}</span>
             </button>
           )}
         </div>
@@ -373,7 +374,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1.5">
                 <span className="px-3 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300">
-                  {lang === 'am' ? 'የትምህርት ሚኒስቴር የ2017 ዓ.ም' : 'FDRE Ministry of Education • 2017 E.C.'}
+                  {lang === 'am' ? `የትምህርት ሚኒስቴር የ${currentEcLabel('am')}` : `FDRE Ministry of Education • ${currentEcLabel('en')}`}
                 </span>
                 <span className="text-xs font-semibold text-slate-500">
                   {lang === 'am' ? 'ደብረ ብርሃን ዞን ሁለተኛ ደረጃ' : 'Debre Berhan Secondary Bureau'}

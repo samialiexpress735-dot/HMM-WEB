@@ -94,6 +94,7 @@ import {
   applyAssignmentsToSections,
   nextLetterIndex
 } from '../utils/sectionCapacity';
+import { currentEcLabel, currentEcYear, todayISO } from '../utils/ethiopianCalendar';
 
 interface RegistrarAdminPageProps {
   teachers: Teacher[];
@@ -421,7 +422,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       guardianName: guardianName.trim() || 'Parent/Guardian',
       guardianPhone: guardianPhone.trim() || '+251 91 000 0000',
       conduct,
-      registrationDate: new Date().toISOString().split('T')[0],
+      registrationDate: todayISO(),
       avatar: ''
     };
 
@@ -807,12 +808,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Export Allocation Rosters to Official CSV
   const handleDownloadCsv = () => {
     if (!previewBuckets || previewBuckets.length === 0) return;
-    const csvContent = generateSectionRosterCsv(previewBuckets, '2019 E.C.');
+    const csvContent = generateSectionRosterCsv(previewBuckets, SCHOOL_INFO.registrationYear);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_2017_EC.csv`);
+    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_${currentEcYear()}_EC.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1032,10 +1033,10 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
     setAllocationSuccessMessage(
       lang === 'am'
-        ? `በ2019 ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
+        ? `በ${currentEcLabel('am')} ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) በተሳካ ሁኔታ ተፈጥረዋል!`
-        : `Successfully created ${previewBuckets.length} new 2019 E.C. sections (${previewBuckets
+        : `Successfully created ${previewBuckets.length} new ${currentEcLabel('en')} sections (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) with room assignments and merit/gender balancing!`
     );
@@ -1575,7 +1576,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <UserPlus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">No Grade {targetGrade} Students Enrolled Yet</p>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Use the intake form on the left or select a 2018 E.C. candidate above to enroll the first applicant.
+                      Use the intake form on the left or select a {SCHOOL_INFO.previousYear} candidate above to enroll the first applicant.
                     </p>
                   </div>
                 ) : (
@@ -2513,7 +2514,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                    2019 E.C. Academic Registry
+                    {currentEcLabel('en')} Academic Registry
                   </span>
                   <h3 className="text-xl font-black text-white mt-1">
                     {lang === 'am' ? 'ክፍሎች በተሳካ ሁኔታ ተመዝግበዋል!' : 'Sections Successfully Committed!'}
@@ -2527,7 +2528,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900 text-xs leading-relaxed space-y-2">
                 <p className="font-bold">
                   {lang === 'am'
-                    ? `የ2019 ዓ.ም. ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
+                    ? `የ${currentEcLabel('am')} ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
                     : `Successfully recorded ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} sections (${(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).join(', ')}) into the school active roster.`}
                 </p>
                 <p className="text-emerald-700 text-[11px]">

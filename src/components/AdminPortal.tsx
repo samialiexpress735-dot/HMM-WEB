@@ -46,6 +46,9 @@ import {
 } from '../lib/supabase';
 
 import { AdminUser } from './AdminSignupPage';
+import { DualDatePicker } from './DualDatePicker';
+import { academicYearLabel, academicYearShort, currentAcademicYear, currentEcLabel, currentEcYear, formatDualDate, formatEthiopian, formatGregorian, todayISO } from '../utils/ethiopianCalendar';
+import { DualDate } from './DualDate';
 
 interface AdminPortalProps {
   teachers: Teacher[];
@@ -118,7 +121,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
 
     const nextIdNum = String(students.length + 1).padStart(4, '0');
-    const studentId = `HMM-2024-${nextIdNum}`;
+    const studentId = `HMM-${currentAcademicYear().gcStart}-${nextIdNum}`; // G.C. year the school year starts in
 
     const newStudent: Student = {
       id: `std-${Date.now()}`,
@@ -130,7 +133,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       section: newStudentSection.toUpperCase(),
       stream: newStudentGrade >= 11 && (newStudentStream === 'Natural Science' || newStudentStream === 'Social Science') ? newStudentStream : undefined,
       streamAmharic: newStudentGrade >= 11 ? (newStudentStream === 'Natural Science' ? 'የተፈጥሮ ሳይንስ' : 'የማህበራዊ ሳይንስ') : undefined,
-      academicYear: '2024/2025 (2017 ዓ.ም.)',
+      academicYear: academicYearShort(undefined, 'am'),
       rank: students.filter((s) => s.grade === newStudentGrade && s.section === newStudentSection.toUpperCase()).length + 1,
       totalStudentsInSection: students.filter((s) => s.grade === newStudentGrade && s.section === newStudentSection.toUpperCase()).length + 1,
       attendanceRate: 98.0,
@@ -210,8 +213,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // New Calendar Event Form State
   const [eventTitle, setEventTitle] = useState('');
   const [eventTitleAmharic, setEventTitleAmharic] = useState('');
-  const [eventDate, setEventDate] = useState('2024-11-15');
-  const [eventEthDate, setEventEthDate] = useState('ህዳር 6 ቀን 2017');
+  const [eventDate, setEventDate] = useState(todayISO()); // G.C. ISO date; the E.C. date is always derived from it
   const [eventTime, setEventTime] = useState('8:30 AM');
   const [eventLocation, setEventLocation] = useState('School Main Assembly Hall');
   const [eventCategory, setEventCategory] = useState<'Exam' | 'Holiday' | 'Sports' | 'PTA' | 'Academic' | 'Club'>('Academic');
@@ -380,8 +382,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       id: `ann-${Date.now()}`,
       title: annTitle.trim(),
       titleAmharic: annTitleAmharic.trim() || undefined,
-      date: new Date().toISOString().split('T')[0],
-      datePosted: new Date().toISOString().split('T')[0],
+      date: todayISO(),
+      datePosted: todayISO(),
       category: annCategory,
       postedBy: currentAdmin.fullName || 'School Director',
       summary: annSummary.trim(),
@@ -409,7 +411,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       title: eventTitle.trim(),
       titleAmharic: eventTitleAmharic.trim() || eventTitle.trim(),
       date: eventDate,
-      ethiopianDate: eventEthDate,
+      ethiopianDate: formatEthiopian(eventDate, 'am', { era: false }),
       time: eventTime,
       location: eventLocation,
       category: eventCategory,
@@ -421,7 +423,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (onAddEvent) {
       onAddEvent(newEv);
     }
-    setSuccessBanner(`✓ Calendar Event "${eventTitle}" added for ${eventEthDate}!`);
+    setSuccessBanner(`✓ Calendar Event "${eventTitle}" added for ${formatDualDate(eventDate)}!`);
     setEventTitle('');
     setEventTitleAmharic('');
     setEventDesc('');
@@ -454,7 +456,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               className="btn-academic min-w-0 flex-1 sm:flex-none justify-center px-3.5 py-2.5 sm:py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold rounded-full flex items-center gap-1.5 cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5 text-emerald-950 shrink-0" />
-              <span className="truncate">{lang === 'am' ? 'ምዝገባ (2017 ዓ.ም.) →' : 'Registrar →'}</span>
+              <span className="truncate">{lang === 'am' ? `ምዝገባ (${currentEcLabel('am')}) →` : 'Registrar →'}</span>
             </button>
           )}
           {onNavigateToGrades && (
@@ -648,7 +650,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Academic Year: 2017 E.C. (2024/2025) · Term 1 In Session</span>
+                  <span>Academic Year: {academicYearLabel('en')} · Term 1 In Session</span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   {lang === 'am' ? 'የትምህርት ቤቱ አስተዳደር መቆጣጠሪያ ማዕከል' : 'School overview'}
@@ -666,7 +668,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     className="px-4 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl flex items-center gap-2 shadow-sm transition-transform cursor-pointer hover:scale-105"
                   >
                     <Shuffle className="w-4 h-4 text-emerald-950" />
-                    <span>Distribute Sections (2017 E.C.)</span>
+                    <span>Distribute Sections ({currentEcLabel('en')})</span>
                   </button>
                 )}
 
@@ -780,7 +782,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <Shuffle className="w-5 h-5 text-emerald-800" />
                 </div>
                 <h4 className="font-extrabold text-slate-900 text-sm group-hover:text-emerald-800">
-                  Section Balancing (2017 E.C.)
+                  Section Balancing ({currentEcLabel('en')})
                 </h4>
                 <p className="text-xs text-slate-500">
                   Automated gender/merit distribution, capacity limits, and student drag/drop transfers.
@@ -876,7 +878,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   <div key={ann.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-900">{ann.title}</span>
-                      <span className="text-[10px] text-slate-500">{ann.date}</span>
+                      <DualDate date={ann.date} lang={lang} className="text-[10px] text-slate-500" />
                     </div>
                     <p className="text-slate-600 mt-1 line-clamp-2">{ann.summary}</p>
                   </div>
@@ -1716,7 +1718,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <div className="max-w-md mx-auto space-y-1">
                   <h4 className="font-bold text-slate-900 text-base">No Students Enrolled Yet</h4>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Student rosters can be enrolled individually using the Quick Enroll button or imported in bulk from Feeder Schools via the 2017 Registrar Allocator.
+                    Student rosters can be enrolled individually using the Quick Enroll button or imported in bulk from Feeder Schools via the {currentEcYear()} Registrar Allocator.
                   </p>
                 </div>
                 <div className="flex items-center justify-center gap-3 pt-2">
@@ -1731,7 +1733,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       onClick={onNavigateToRegistrar}
                       className="px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer"
                     >
-                      Go to Section Allocator (2017 E.C.) →
+                      Go to Section Allocator ({currentEcLabel('en')}) →
                     </button>
                   )}
                 </div>
@@ -2535,21 +2537,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-slate-700 block mb-1">
-                      Ethiopian Date (የኢትዮጵያ ቀን):
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g., ጥቅምት 25 ቀን 2017"
-                      value={eventEthDate}
-                      onChange={(e) => setEventEthDate(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
+                  <div className="col-span-2">
+                    <DualDatePicker value={eventDate} onChange={setEventDate} lang={lang} />
                   </div>
 
-                  <div>
+                  <div className="col-span-2">
                     <label className="font-semibold text-slate-700 block mb-1">Category:</label>
                     <select
                       value={eventCategory}
@@ -2653,7 +2645,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       <p className="text-slate-700 text-xs leading-relaxed">{ann.summary}</p>
                       <div className="mt-3 pt-2 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-500">
                         <span>Category: <strong>{ann.category}</strong></span>
-                        <span>Posted on: {ann.datePosted}</span>
+                        <span>Posted on: <DualDate date={ann.datePosted} lang={lang} layout="inline" /></span>
                       </div>
                     </div>
                   ))}
@@ -2696,8 +2688,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <div className="font-black text-slate-900 text-xs">{ev.ethiopianDate}</div>
-                        <div className="text-[10px] text-slate-400">{ev.date}</div>
+                        <div className="font-black text-slate-900 text-xs">{formatEthiopian(ev.date, 'am', { era: false }) || ev.ethiopianDate}</div>
+                        <div className="text-[10px] text-slate-400">{formatGregorian(ev.date) || ev.date}</div>
                       </div>
                     </div>
                   ))}

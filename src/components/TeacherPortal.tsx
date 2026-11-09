@@ -52,6 +52,8 @@ import {
   getTeacherRolesForSection,
   getStudentsForSection
 } from '../utils/sectionUtils';
+import { DualDate } from './DualDate';
+import { academicYearLabel, addDaysISO, toLocalISO, todayISO } from '../utils/ethiopianCalendar';
 
 export interface AssessmentColumn {
   id: string;
@@ -69,7 +71,7 @@ export function getRecentSchoolDays(count: number = 12): string[] {
     d.setDate(current.getDate() - checked);
     const dayOfWeek = d.getDay();
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      days.unshift(d.toISOString().split('T')[0]);
+      days.unshift(toLocalISO(d));
     }
     checked++;
   }
@@ -223,16 +225,16 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       section: '9A',
       title: 'Chapter 4 Quiz & Homework Submission',
       content: 'Complete problems 1 to 15 on page 84 of the national textbook before Wednesday.',
-      date: '2025-01-20',
-      dueDate: '2025-01-22'
+      date: addDaysISO(todayISO(), -2),
+      dueDate: addDaysISO(todayISO(), 0)
     },
     {
       id: 'n2',
       section: '9A',
       title: 'Science Lab Preparation',
       content: 'Bring lab notebooks and protective coats for Thursday practical chemistry demonstration.',
-      date: '2025-01-18',
-      dueDate: '2025-01-23'
+      date: addDaysISO(todayISO(), -4),
+      dueDate: addDaysISO(todayISO(), 1)
     }
   ]);
   const [newNoticeTitle, setNewNoticeTitle] = useState('');
@@ -434,7 +436,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               <span className="font-bold text-lg text-amber-300">HMM</span>
             </div>
             <div className="text-xs text-emerald-400 font-medium mb-1">
-              Debre Berhan, Ethiopia · Academic Year 2017 E.C.
+              Debre Berhan, Ethiopia · Academic Year {academicYearLabel('en')}
             </div>
             <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
               {lang === 'am' ? 'የመምህራን መግቢያ እና የክፍል መቆጣጠሪያ' : 'Teacher sign in'}
@@ -949,7 +951,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       section: selectedSection || '',
       title: newNoticeTitle.trim(),
       content: newNoticeContent.trim(),
-      date: new Date().toISOString().split('T')[0],
+      date: todayISO(),
       dueDate: newNoticeDueDate || undefined
     };
 
@@ -1231,7 +1233,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Instructor: <strong>{activeTeacherUser.name}</strong> • Academic Year: <strong>2017 E.C. (2017 ዓ.ም.)</strong> • {sectionStudents.length} Students Enrolled
+                Instructor: <strong>{activeTeacherUser.name}</strong> • Academic Year: <strong>{academicYearLabel(lang)}</strong> • {sectionStudents.length} Students Enrolled
               </p>
             </div>
           </div>
@@ -1819,12 +1821,12 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                     <div key={notice.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-slate-900 text-xs sm:text-sm">{notice.title}</span>
-                        <span className="font-mono text-[11px] text-slate-400">{notice.date}</span>
+                        <DualDate date={notice.date} lang={lang} className="font-mono text-[11px] text-slate-400" />
                       </div>
                       <p className="text-xs text-slate-600 leading-relaxed">{notice.content}</p>
                       {notice.dueDate && (
                         <div className="text-[11px] font-semibold text-amber-700 pt-1">
-                          Deadline: {notice.dueDate}
+                          Deadline: <DualDate date={notice.dueDate} lang={lang} layout="inline" />
                         </div>
                       )}
                     </div>

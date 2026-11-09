@@ -7,6 +7,7 @@ import {
   subscribeToAttendanceRealtime,
   isSupabaseConfigured
 } from '../lib/supabase';
+import { toLocalISO } from '../utils/ethiopianCalendar';
 
 export type { AttendanceStatus };
 export type AttendanceCell = { status: AttendanceStatus; note?: string };
@@ -17,9 +18,8 @@ export type AttendanceApi = ReturnType<typeof useAttendance>;
 
 const HISTORY_DAYS = 90;
 
-// Dates are built from LOCAL time. (toISOString() uses UTC and shows yesterday for 3 hours after midnight in Ethiopia.)
-export const toLocalISO = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Dates are built from LOCAL time (see ethiopianCalendar.ts). toISOString() is UTC and shows yesterday for 3 hours after midnight in Ethiopia.
+export { toLocalISO };
 const parse = (iso: string) => new Date(`${iso}T00:00:00`);
 export const isSchoolDay = (iso: string) => {
   const w = parse(iso).getDay();

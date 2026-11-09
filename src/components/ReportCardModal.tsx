@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Printer, Award, CheckCircle, Shield, Building2 } from 'lucide-react';
 import { Student } from '../data/schoolData';
 import { evaluateSemesterPerformance, evaluateSubjectGrade } from '../utils/gradeCalculations';
+import { formatDualDate } from '../utils/ethiopianCalendar';
 
 interface ReportCardModalProps {
   student: Student;
@@ -220,7 +221,7 @@ export const ReportCardModal: React.FC<ReportCardModalProps> = ({
               <Shield className="w-3.5 h-3.5 text-emerald-700" />
               Cryptographically verifiable through Hailemariam Mamo School SIS Portal
             </span>
-            <span>Generated on {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+            <span>Generated on {formatDualDate(new Date())}</span>
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { SCHOOL_INFO } from '../data/schoolInfo';
+import { currentGcYear } from '../utils/ethiopianCalendar';
 
 interface AboutAndCampusProps {
   lang: 'en' | 'am';
@@ -223,7 +224,7 @@ export const AboutAndCampus: React.FC<AboutAndCampusProps> = ({ lang }) => {
                 Application Received Successfully!
               </h4>
               <p className="text-xs text-emerald-800 max-w-md mx-auto">
-                Thank you, <strong>{applicantName}</strong>. Your intake record from <strong>{feederSchool}</strong> has been logged with Registration Ticket <strong>#HMM-INTAKE-2025-{Math.floor(1000 + Math.random() * 9000)}</strong>.
+                Thank you, <strong>{applicantName}</strong>. Your intake record from <strong>{feederSchool}</strong> has been logged with Registration Ticket <strong>#HMM-INTAKE-{currentGcYear()}-{Math.floor(1000 + Math.random() * 9000)}</strong>.
               </p>
               <p className="text-[11px] text-slate-600">
                 Please bring your original Grade 8 / Grade 10 certificate to the Registrar Office at Hailemariam Mamo Secondary Campus within 5 working days.

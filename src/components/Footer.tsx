@@ -3,6 +3,7 @@ import { Shield, MapPin, Phone, Mail, Award, ExternalLink, Globe, Cloud } from '
 import { CloudDeployModal } from './CloudDeployModal';
 
 import { SCHOOL_INFO } from '../data/schoolInfo';
+import { currentEcLabel, currentGcYear } from '../utils/ethiopianCalendar';
 
 interface FooterProps {
   onNavigate: (tab: string) => void;
@@ -157,7 +158,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, lang }) => {
         </div>
 
         <div className="mt-12 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
-          <p>© {new Date().getFullYear()} Hailemariam Mamo Secondary & Preparatory School. All Rights Reserved.</p>
+          <p>© {currentGcYear()} ({currentEcLabel(lang)}) Hailemariam Mamo Secondary & Preparatory School. All Rights Reserved.</p>
           <div className="flex flex-wrap items-center gap-3">
             <p className="flex items-center gap-1.5 text-slate-400">
               <Shield className="w-3.5 h-3.5 text-emerald-500" />

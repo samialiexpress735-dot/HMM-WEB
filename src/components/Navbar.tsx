@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AdminUser } from './AdminSignupPage';
 import { Teacher } from '../data/schoolData';
+import { currentEcLabel } from '../utils/ethiopianCalendar';
 
 interface NavbarProps {
   currentTab: string;
@@ -59,7 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const adminNavItems = [
     { id: 'admin', labelEn: adminUser ? 'Admin portal' : 'Admin Login', labelAm: adminUser ? 'አድሚን ዴስክ' : 'አድሚን መግቢያ', icon: adminUser ? ShieldCheck : Lock },
-    { id: 'registrar', labelEn: 'Registrar (2017 E.C.)', labelAm: 'ምዝገባ (2017 ዓ.ም.)', icon: UserPlus },
+    { id: 'registrar', labelEn: `Registrar (${currentEcLabel('en')})`, labelAm: `ምዝገባ (${currentEcLabel('am')})`, icon: UserPlus },
     { id: 'grades', labelEn: 'Sections & Curriculum', labelAm: 'ክፍሎችና ሥርዓተ-ትምህርት', icon: Layers },
     { id: 'teacher', labelEn: 'Teacher Suite', labelAm: 'የመምህራን ዴስክ', icon: FileSpreadsheet }
   ];

@@ -8,6 +8,7 @@ import {
   recentSchoolDays,
   shiftSchoolDay
 } from '../hooks/useAttendance';
+import { formatDualDateLong, formatEthiopian } from '../utils/ethiopianCalendar';
 
 const STATUS: { key: AttendanceStatus; short: string; label: string; on: string; chip: string; bar: string }[] = [
   { key: 'Present', short: 'P', label: 'Present', on: 'bg-emerald-600 text-white', chip: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-500' },
@@ -18,8 +19,10 @@ const STATUS: { key: AttendanceStatus; short: string; label: string; on: string;
 const CYCLE: (AttendanceStatus | undefined)[] = [undefined, 'Present', 'Late', 'Permission', 'Absent'];
 const meta = (s: AttendanceStatus) => STATUS.find((x) => x.key === s)!;
 
-const fmtLong = (iso: string) =>
+// Gregorian long form for the main header; fmtLong (tooltips / screen readers) names the day in BOTH calendars.
+const fmtGcLong = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fmtLong = (iso: string) => formatDualDateLong(iso) || iso;
 const fmtShort = (iso: string) => {
   const d = new Date(`${iso}T00:00:00`);
   return { wd: d.toLocaleDateString('en-US', { weekday: 'narrow' }), day: d.getDate(), mon: d.toLocaleDateString('en-US', { month: 'short' }) };
@@ -118,7 +121,8 @@ export const AttendanceTab: React.FC<Props> = ({ students, section, att }) => {
               <div className="flex items-center gap-1">
                 <button aria-label="Previous school day" onClick={() => setDate(shiftSchoolDay(date, -1))} className="p-2 rounded-full hover:bg-slate-200 cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
                 <div className="px-2 text-center min-w-[200px]">
-                  <div className="font-display font-bold text-slate-900">{fmtLong(date)}</div>
+                  <div className="font-display font-bold text-slate-900">{fmtGcLong(date)}</div>
+                  <div className="text-xs font-semibold text-slate-500">{formatEthiopian(date)}</div>
                   {date === lastDay && <div className="text-[11px] text-emerald-700 font-semibold">Today</div>}
                 </div>
                 <button aria-label="Next school day" disabled={date >= lastDay} onClick={() => setDate(shiftSchoolDay(date, 1))} className="p-2 rounded-full hover:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer disabled:cursor-default"><ChevronRight className="w-4 h-4" /></button>

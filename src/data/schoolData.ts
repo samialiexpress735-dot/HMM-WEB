@@ -1,3 +1,4 @@
+import { currentEcYear, ethiopianToIso } from '../utils/ethiopianCalendar';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -153,13 +154,16 @@ export interface SchoolAnnouncement {
   isUrgent?: boolean;
 }
 
+/** 1 Meskerem of the current Ethiopian year as a G.C. ISO date: the first day of the school year. */
+const ACADEMIC_YEAR_START = ethiopianToIso(currentEcYear(), 1, 1);
+
 export const INITIAL_ANNOUNCEMENTS: SchoolAnnouncement[] = [
   {
     id: 'ann-1',
     title: 'Welcome to Hailemariam Mamo Secondary & Preparatory School Portal',
     titleAmharic: 'እንኳን ወደ ደብረ ብርሃን ኃይለማሪያም ማሞ አጠቃላይ ሁለተኛና መሰናዶ ት/ቤት በደህና መጡ',
-    date: '2024-09-01',
-    datePosted: '2024-09-01',
+    date: ACADEMIC_YEAR_START,
+    datePosted: ACADEMIC_YEAR_START,
     category: 'Administrative',
     postedBy: 'Principal Office',
     summary: 'Official digital system for students, parents, faculty mark records, and semester registration. Debre Berhan, Amhara Region.',
@@ -170,7 +174,7 @@ export const INITIAL_ANNOUNCEMENTS: SchoolAnnouncement[] = [
 export const SCHOOL_ANNOUNCEMENTS: SchoolAnnouncement[] = INITIAL_ANNOUNCEMENTS;
 
 // -------------------------------------------------------------------------------------------------
-// GRADES OF THIS YEAR (2019 E.C.) - GRADE LEVELS & SECTIONS
+// GRADES OF THIS YEAR - GRADE LEVELS & SECTIONS
 // -------------------------------------------------------------------------------------------------
 
 export interface SectionSubjectAssignment {

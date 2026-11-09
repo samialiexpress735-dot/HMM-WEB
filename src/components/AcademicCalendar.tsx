@@ -12,6 +12,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { SchoolEvent } from '../data/schoolData';
+import { academicYearLabel, currentEcLabel, dualDateParts, formatEthiopian } from '../utils/ethiopianCalendar';
 
 interface AcademicCalendarProps {
   events: SchoolEvent[];
@@ -97,8 +98,8 @@ END:VCALENDAR`;
             </div>
             <p className="text-xs md:text-sm text-slate-500 mt-1">
               {lang === 'am'
-                ? '2017 ዓ.ም የኢትዮጵያ የትምህርት ዘመን • ፈተናዎች፣ የዕረፍት ቀናት እና የክፍለ-ጊዜ መርሃ-ግብር'
-                : 'Ethiopian Academic Year 2017 E.C. (2024/2025) • Examination schedules, official holidays, and daily period bells'}
+                ? `${currentEcLabel('am')} የኢትዮጵያ የትምህርት ዘመን • ፈተናዎች፣ የዕረፍት ቀናት እና የክፍለ-ጊዜ መርሃ-ግብር`
+                : `Ethiopian Academic Year ${academicYearLabel('en')} • Examination schedules, official holidays, and daily period bells`}
             </p>
           </div>
 
@@ -195,13 +196,13 @@ END:VCALENDAR`;
                       {/* Date Block */}
                       <div className="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-slate-900 text-white flex flex-col items-center justify-center flex-shrink-0 shadow-sm border border-slate-800">
                         <span className="text-[10px] md:text-xs font-bold text-amber-400 uppercase tracking-wider">
-                          {new Date(ev.date).toLocaleString('en-US', { month: 'short' })}
+                          {dualDateParts(ev.date, 'en')?.gc.month ?? ''}
                         </span>
                         <span className="text-xl md:text-2xl font-bold font-mono leading-tight">
-                          {new Date(ev.date).getDate()}
+                          {dualDateParts(ev.date, lang)?.gc.day ?? ''}
                         </span>
                         <span className="text-[9px] text-slate-400 leading-none">
-                          {new Date(ev.date).getFullYear()}
+                          {dualDateParts(ev.date, lang)?.gc.year ?? ''}
                         </span>
                       </div>
 
@@ -224,7 +225,7 @@ END:VCALENDAR`;
 
                           {/* Ethiopian Calendar Badge */}
                           <span className="text-[11px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                            🇪🇹 {ev.ethiopianDate}
+                            🇪🇹 {formatEthiopian(ev.date, lang) || ev.ethiopianDate}
                           </span>
 
                           {ev.isImportant && (

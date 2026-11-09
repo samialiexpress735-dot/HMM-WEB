@@ -1,3 +1,4 @@
+import { currentEcLabel } from './ethiopianCalendar';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -355,7 +356,7 @@ export function reassignStudentToSection(
  */
 export function generateSectionRosterCsv(
   buckets: SectionAllocationBucket[],
-  academicYear: string = '2017 E.C.'
+  academicYear: string = currentEcLabel()
 ): string {
   const headers = [
     'Academic Year',
