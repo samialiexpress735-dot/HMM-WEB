@@ -59,6 +59,14 @@ function stu(grade: number, gender: 'M' | 'F', extra: Partial<RegisteredStudent2
   };
 }
 
+/** Students already placed in a class: the only thing that counts as "taken" now. */
+function placedIn(code: string, grade: number, males: number, females: number): RegisteredStudent2019[] {
+  return [
+    ...Array.from({ length: males }, () => stu(grade, 'M', { allocatedSection: code })),
+    ...Array.from({ length: females }, () => stu(grade, 'F', { allocatedSection: code }))
+  ];
+}
+
 test('capacity falls back to the default when a section has none saved', () => {
   assert.equal(getSectionCapacity(sec('9A', 9, 'A')), DEFAULT_SECTION_CAPACITY);
   assert.equal(getSectionCapacity(sec('9A', 9, 'A', { capacity: 40 })), 40);
@@ -66,29 +74,38 @@ test('capacity falls back to the default when a section has none saved', () => {
 });
 
 test('free seats = capacity minus students already placed', () => {
-  const s = sec('9A', 9, 'A', { capacity: 40, totalStudents: 30, maleStudents: 15, femaleStudents: 15 });
-  const fill = getSectionFill(s, []);
+  const s = sec('9A', 9, 'A', { capacity: 40 });
+  const fill = getSectionFill(s, placedIn('9A', 9, 15, 15));
   assert.equal(fill.enrolled, 30);
   assert.equal(fill.free, 10);
 });
 
+test('a stale saved count is ignored: deleted students give their seats back', () => {
+  // The class still says 30 students, but none of them exist any more.
+  const s = sec('9A', 9, 'A', { capacity: 40, totalStudents: 30, maleStudents: 15, femaleStudents: 15 });
+  const fill = getSectionFill(s, []);
+  assert.deepEqual([fill.enrolled, fill.male, fill.female, fill.free], [0, 0, 0, 40]);
+});
+
 test('seats cannot be lowered below the number of students in the class', () => {
-  const s = sec('9A', 9, 'A', { capacity: 40, totalStudents: 30 });
-  assert.equal(validateSectionCapacity(s, 29, []).ok, false);
-  assert.equal(validateSectionCapacity(s, 29, []).minimum, 30);
-  assert.equal(validateSectionCapacity(s, 30, []).ok, true);
-  assert.equal(validateSectionCapacity(s, 60, []).ok, true);
+  const s = sec('9A', 9, 'A', { capacity: 40 });
+  const inClass = placedIn('9A', 9, 15, 15);
+  assert.equal(validateSectionCapacity(s, 29, inClass).ok, false);
+  assert.equal(validateSectionCapacity(s, 29, inClass).minimum, 30);
+  assert.equal(validateSectionCapacity(s, 30, inClass).ok, true);
+  assert.equal(validateSectionCapacity(s, 60, inClass).ok, true);
 });
 
 test('40 seats, 30 students: new matching students are moved in until the class is full', () => {
-  const sections = [sec('9A', 9, 'A', { capacity: 40, totalStudents: 30, maleStudents: 15, femaleStudents: 15 })];
+  const sections = [sec('9A', 9, 'A', { capacity: 40 })];
+  const inClass = placedIn('9A', 9, 15, 15);
   const waiting = Array.from({ length: 14 }, (_, i) => stu(9, i % 2 ? 'M' : 'F'));
-  const { assignments, remaining } = planSeatFilling(waiting, sections, waiting);
+  const { assignments, remaining } = planSeatFilling(waiting, sections, [...inClass, ...waiting]);
   assert.equal(assignments.length, 10);
   assert.equal(remaining.length, 4);
   assert.ok(assignments.every((a) => a.sectionCode === '9A'));
 
-  const updated = applyAssignmentsToSections(sections, assignments, waiting);
+  const updated = applyAssignmentsToSections(sections, assignments, [...inClass, ...waiting]);
   assert.equal(updated.length, 1);
   assert.equal(updated[0].totalStudents, 40);
   assert.equal(updated[0].maleStudents + updated[0].femaleStudents, 40);
@@ -112,29 +129,27 @@ test('Grade 11 students only go to a class of their own stream', () => {
 });
 
 test('a full class takes nobody, and CTE groups are never used for academic placement', () => {
-  const full = sec('9A', 9, 'A', { capacity: 30, totalStudents: 30 });
+  const full = sec('9A', 9, 'A', { capacity: 30 });
   const cte = sec('11-CTE-WD', 11, 'A', { isCteSection: true, capacity: 40 });
   const waiting = [stu(9, 'M'), stu(11, 'F', { stream: 'Natural Science' })];
-  const { assignments, remaining } = planSeatFilling(waiting, [full, cte], waiting);
+  const { assignments, remaining } = planSeatFilling(waiting, [full, cte], [...placedIn('9A', 9, 15, 15), ...waiting]);
   assert.equal(assignments.length, 0);
   assert.equal(remaining.length, 2);
   assert.equal(sectionAcceptsStudent(cte, waiting[1]), false);
 });
 
 test('the emptier class is filled first, and class sizes level out', () => {
-  const sections = [
-    sec('9A', 9, 'A', { capacity: 40, totalStudents: 30, maleStudents: 15, femaleStudents: 15 }),
-    sec('9B', 9, 'B', { capacity: 40, totalStudents: 20, maleStudents: 10, femaleStudents: 10 })
-  ];
+  const sections = [sec('9A', 9, 'A', { capacity: 40 }), sec('9B', 9, 'B', { capacity: 40 })];
+  const existing = [...placedIn('9A', 9, 15, 15), ...placedIn('9B', 9, 10, 10)];
   const six = Array.from({ length: 6 }, () => stu(9, 'M'));
-  const a = planSeatFilling(six, sections, six);
+  const a = planSeatFilling(six, sections, [...existing, ...six]);
   // 9B has fewer students, and still has fewer after 6 more
   assert.ok(a.assignments.every((x) => x.sectionCode === '9B'));
 
   // With 20 more boys 9B catches up to 30, then they alternate; nobody goes over 40 seats
   const many = Array.from({ length: 20 }, () => stu(9, 'M'));
-  const b = planSeatFilling(many, sections, many);
-  const updated = applyAssignmentsToSections(sections, b.assignments, many);
+  const b = planSeatFilling(many, sections, [...existing, ...many]);
+  const updated = applyAssignmentsToSections(sections, b.assignments, [...existing, ...many]);
   const totals = Object.fromEntries(updated.map((u) => [u.section, u.totalStudents]));
   assert.ok(totals['9A'] <= 40 && totals['9B'] <= 40);
   assert.ok(Math.abs(totals['9A'] - totals['9B']) <= 1);

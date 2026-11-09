@@ -113,8 +113,10 @@ export function getStudentCteTrack(s: Pick<Student, 'cteSpecialization' | 'semes
 }
 
 /**
- * Enrollment numbers to display for a section. Never lower than the students we can actually find in it,
- * so the number on a card, the roster and the totals always agree.
+ * Enrollment numbers to display for a section. These are counted from the students that really exist
+ * right now, so the number on a card, the roster and the totals always agree, and a student deleted
+ * from the database stops being counted. (The head count saved on the section itself can be stale,
+ * so it is not used for display.)
  */
 export function getSectionHeadcount(
   section: GradeSection,
@@ -122,12 +124,28 @@ export function getSectionHeadcount(
   students: Student[]
 ): { total: number; male: number; female: number } {
   const roster = getStudentsForSection(section.section, sections, students);
-  const stored = section.totalStudents || 0;
-  if (roster.length >= stored) {
-    const male = roster.filter((s) => s.gender === 'M').length;
-    return { total: roster.length, male, female: roster.length - male };
-  }
-  return { total: stored, male: section.maleStudents || 0, female: section.femaleStudents || 0 };
+  const male = roster.filter((s) => s.gender === 'M').length;
+  return { total: roster.length, male, female: roster.length - male };
+}
+
+/**
+ * Returns the sections whose saved head count (total / male / female) no longer matches the students
+ * that really exist, with the counts corrected. Sections that are already right are not returned.
+ * Used to repair the saved numbers after students were deleted straight from the database.
+ */
+export function findSectionsWithStaleCounts(sections: GradeSection[], students: Student[]): GradeSection[] {
+  const fixed: GradeSection[] = [];
+  sections.forEach((sec) => {
+    const hc = getSectionHeadcount(sec, sections, students);
+    if (
+      (sec.totalStudents || 0) !== hc.total ||
+      (sec.maleStudents || 0) !== hc.male ||
+      (sec.femaleStudents || 0) !== hc.female
+    ) {
+      fixed.push({ ...sec, totalStudents: hc.total, maleStudents: hc.male, femaleStudents: hc.female });
+    }
+  });
+  return fixed;
 }
 
 /**

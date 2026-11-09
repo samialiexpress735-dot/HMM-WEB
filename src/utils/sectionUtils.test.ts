@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GradeSection, Student } from '../data/schoolData';
-import { getSectionHeadcount, getStudentCteTrack, getStudentsForSection } from './sectionUtils';
+import { findSectionsWithStaleCounts, getSectionHeadcount, getStudentCteTrack, getStudentsForSection } from './sectionUtils';
 
 const cteSection = {
   id: 'c1', section: '12-CTE-WD', grade: 12, sectionLetter: 'WD', isCteSection: true,
@@ -34,9 +34,18 @@ test('students of another grade or track are not pulled into the CTE section', (
   assert.deepEqual(getStudentsForSection('12-CTE-WD', [cteSection], [refreshed, g11, acc]).map((s) => s.id), ['s1']);
 });
 
-test('headcount never drops below the students actually found, and keeps the registry number when higher', () => {
-  const found = getSectionHeadcount({ ...cteSection, totalStudents: 0, maleStudents: 0, femaleStudents: 0 }, [cteSection], [refreshed]);
-  assert.deepEqual(found, { total: 1, male: 1, female: 0 });
-  const registryHigher = getSectionHeadcount({ ...cteSection, totalStudents: 45, maleStudents: 20, femaleStudents: 25 }, [cteSection], [refreshed]);
-  assert.deepEqual(registryHigher, { total: 45, male: 20, female: 25 });
+test('headcount is counted from the students that really exist, so deleted students stop counting', () => {
+  // The section still says 45 students / 20 boys / 25 girls, but only one student is left in the database.
+  const stale = { ...cteSection, totalStudents: 45, maleStudents: 20, femaleStudents: 25 };
+  assert.deepEqual(getSectionHeadcount(stale, [stale], [refreshed]), { total: 1, male: 1, female: 0 });
+  // Every student deleted: the count goes to zero instead of keeping the old number.
+  assert.deepEqual(getSectionHeadcount(stale, [stale], []), { total: 0, male: 0, female: 0 });
+});
+
+test('stale saved counts are found and corrected; correct ones are left alone', () => {
+  const stale = { ...cteSection, totalStudents: 45, maleStudents: 20, femaleStudents: 25 };
+  const fixed = findSectionsWithStaleCounts([stale], [refreshed]);
+  assert.equal(fixed.length, 1);
+  assert.deepEqual([fixed[0].totalStudents, fixed[0].maleStudents, fixed[0].femaleStudents], [1, 1, 0]);
+  assert.equal(findSectionsWithStaleCounts(fixed, [refreshed]).length, 0);
 });

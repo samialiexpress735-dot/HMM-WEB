@@ -43,15 +43,16 @@ export interface SectionFill {
 }
 
 /**
- * How full a section is. Uses the larger of the section's own saved counts and the number of
- * registered students placed in it, so a seat is never counted as free when it is taken.
+ * How full a section is, counted from the registered students that are placed in it right now.
+ * The head count saved on the section is NOT used: it can be out of date (for example after students
+ * were deleted from the database), and trusting it would keep seats taken that are really free.
  * Pass the registered list as it is BEFORE any new placement is applied.
  */
 export function getSectionFill(section: GradeSection, registered: RegisteredStudent2019[]): SectionFill {
   const mine = registered.filter((r) => norm(r.allocatedSection) === norm(section.section));
-  const male = Math.max(section.maleStudents || 0, mine.filter((r) => r.gender === 'M').length);
-  const female = Math.max(section.femaleStudents || 0, mine.filter((r) => r.gender === 'F').length);
-  const enrolled = Math.max(section.totalStudents || 0, mine.length, male + female);
+  const male = mine.filter((r) => r.gender === 'M').length;
+  const female = mine.length - male;
+  const enrolled = mine.length;
   const capacity = getSectionCapacity(section);
   return { enrolled, male, female, capacity, free: Math.max(0, capacity - enrolled) };
 }

@@ -43,7 +43,7 @@ import {
   subscribeToAllSchoolDataRealtime,
   isSupabaseConfigured
 } from './lib/supabase';
-import { getSectionsAssignedToTeacher } from './utils/sectionUtils';
+import { getSectionsAssignedToTeacher, findSectionsWithStaleCounts } from './utils/sectionUtils';
 
 export default function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
@@ -79,6 +79,9 @@ export default function App() {
 
   // When each student was last edited on THIS device (protects fresh typing from a stale cloud refresh)
   const localEditAt = useRef<Map<string, number>>(new Map());
+
+  // True once the first load from the database has finished (or there is no database to wait for)
+  const [cloudLoaded, setCloudLoaded] = useState(false);
 
   // Application Data States (initialized empty or from localStorage for user additions)
   const [students, setStudents] = useState<Student[]>(() => {
@@ -182,6 +185,22 @@ export default function App() {
     }
   }, [announcements]);
 
+  // Repair the head counts saved on each section. If students were deleted straight from the database,
+  // the numbers saved on the sections still include them. Once the real students have loaded, correct
+  // any section whose saved count differs and save the fix so every page and device agrees.
+  useEffect(() => {
+    if (!cloudLoaded) return;
+    const stale = findSectionsWithStaleCounts(sections, students);
+    if (stale.length === 0) return;
+    const byId = new Map(stale.map((sec) => [sec.id, sec]));
+    setSections((prev) => prev.map((sec) => byId.get(sec.id) || sec));
+    if (isSupabaseConfigured()) {
+      stale.forEach((sec) => {
+        syncSectionToCloud(sec).catch(() => {});
+      });
+    }
+  }, [cloudLoaded, sections, students]);
+
   const handleAddEvent = (event: SchoolEvent) => {
     setEvents((prev) => [event, ...prev]);
   };
@@ -246,6 +265,7 @@ export default function App() {
           console.warn('Background cloud sync error:', e);
         }
       }
+      setCloudLoaded(true);
     }
     loadCloudData();
 
