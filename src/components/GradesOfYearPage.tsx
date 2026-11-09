@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Layers,
   Users,
@@ -90,58 +90,6 @@ export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string
   return tSub.includes(sId) || sName.includes(tSub);
 }
 
-/** Mark input for the Marks Desk. Typing stays local; it saves once on Enter / blur / arrow keys,
- *  is capped at the maximum, and never fights the cursor (no instant re-render while typing). */
-const MarkInput: React.FC<{
-  value: number; max: number; row: number; col: number; label: string; onCommit: (n: number) => void;
-}> = ({ value, max, row, col, label, onCommit }) => {
-  const show = (v: number) => (v === 0 ? '' : String(v));
-  const [draft, setDraft] = useState<string>(show(value));
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setDraft(show(value)); }, [value]);
-
-  const num = draft === '' ? 0 : Number(draft);
-  const invalid = draft !== '' && (isNaN(num) || num > max);
-  const commit = () => {
-    focused.current = false;
-    if (draft === '') { if (value !== 0) onCommit(0); return; }
-    if (isNaN(num)) { setDraft(show(value)); return; }
-    const c = Math.max(0, Math.min(max, num));
-    setDraft(show(c));
-    if (c !== value) onCommit(c);
-  };
-  const move = (r: number, c: number) =>
-    (document.querySelector(`[data-mark="${r}:${c}"]`) as HTMLInputElement | null)?.focus();
-
-  return (
-    <input
-      data-mark={`${row}:${col}`}
-      type="text"
-      inputMode="decimal"
-      value={draft}
-      placeholder="–"
-      aria-label={label}
-      aria-invalid={invalid}
-      title={invalid ? `Maximum is ${max}` : `Out of ${max}`}
-      onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
-      onChange={(e) => { if (/^\d*\.?\d*$/.test(e.target.value)) setDraft(e.target.value); }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); commit(); move(row + 1, col); }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); commit(); move(row - 1, col); }
-        else if (e.key === 'Escape') { setDraft(show(value)); e.currentTarget.blur(); }
-      }}
-      className={`w-14 h-9 text-center font-mono text-sm rounded-lg border outline-none transition-colors ${
-        invalid
-          ? 'border-rose-400 bg-rose-50 text-rose-700 ring-2 ring-rose-200'
-          : draft === ''
-          ? 'border-dashed border-slate-300 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200'
-          : 'border-slate-200 bg-white text-slate-900 font-semibold focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200'
-      }`}
-    />
-  );
-};
-
 const gradeTone = (letter: string) =>
   letter.startsWith('A') ? { chip: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-500' }
   : letter.startsWith('B') ? { chip: 'bg-sky-100 text-sky-800', bar: 'bg-sky-500' }
@@ -154,7 +102,6 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   onUpdateSection,
   teachers,
   students,
-  onUpdateStudents,
   lang,
   onNavigateToTeacherPortal,
   onNavigateToGradePortal,
@@ -325,33 +272,6 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   // Get enrolled students for a specific section (handles all formats: 9A, 11-Nat-A, etc.)
   const getStudentsForSection = (section: GradeSection) => {
     return getStudentsForSectionUtil(section.section, sections, students);
-  };
-
-  // Handle mark change for a student in the modal.
-  // Functional update (always builds on the latest list) + capped at each field's maximum.
-  const MARK_MAX = { continuousAssessment: 30, midExam: 20, finalExam: 50 } as const;
-  const handleStudentMarkEdit = (
-    studentId: string,
-    subjectId: string,
-    field: 'continuousAssessment' | 'midExam' | 'finalExam',
-    val: number
-  ) => {
-    if (!onUpdateStudents) return;
-    const safe = Math.max(0, Math.min(MARK_MAX[field], Number(val) || 0));
-    onUpdateStudents((prev) =>
-      prev.map((st) => {
-        if (st.id !== studentId) return st;
-        const target = st.semesters.find((sem) => sem.semester === 1) || st.semesters[0];
-        return {
-          ...st,
-          semesters: st.semesters.map((sem) =>
-            sem !== target
-              ? sem
-              : { ...sem, subjects: sem.subjects.map((sub) => (sub.subjectId !== subjectId ? sub : { ...sub, [field]: safe })) }
-          )
-        };
-      })
-    );
   };
 
   return (
@@ -1177,7 +1097,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       <h3 className="text-lg sm:text-xl font-black text-slate-900">Section {rosterModalSection.section} · Marks Desk</h3>
                       <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded-full font-bold text-xs">{rosterModalSection.stream}</span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">Pick a student, type a mark and press <kbd className="px-1 rounded bg-white border border-slate-300 font-mono">Enter</kbd> to save and move down.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">View only. Marks are entered by each subject teacher in the Teacher Portal.</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1288,7 +1208,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
 
                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-[11px] text-slate-500 flex items-center justify-between gap-2">
                       <span className="font-semibold text-slate-700">Semester 1 · Assessment 30 + Mid 20 + Final 50 = 100</span>
-                      <span className="hidden sm:inline">Changes save instantly</span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-600 font-bold"><ShieldCheck className="w-3 h-3" /> View only</span>
                     </div>
 
                     <div className="flex-1 overflow-auto">
@@ -1305,32 +1225,22 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                           </tr>
                         </thead>
                         <tbody>
-                          {liveSubjects.map((sub, rIdx) => {
+                          {liveSubjects.map((sub) => {
                             const total = calculateTotalScore(sub.continuousAssessment, sub.midExam, sub.finalExam);
                             const letter = getEthiopianLetterGrade(total).letter;
                             const tone = gradeTone(letter);
-                            // Marks typed column-by-column in the teacher gradebook are managed there (one source of truth)
-                            const managed = !!sub.customAssessments && Object.keys(sub.customAssessments).length > 0;
-                            const cells: ['continuousAssessment' | 'midExam' | 'finalExam', number][] = [['continuousAssessment', 30], ['midExam', 20], ['finalExam', 50]];
+                            const cells: ('continuousAssessment' | 'midExam' | 'finalExam')[] = ['continuousAssessment', 'midExam', 'finalExam'];
                             return (
                               <tr key={sub.subjectId} className="group">
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-4">
                                   <div className="font-bold text-slate-900 truncate max-w-[200px]">{sub.subjectName}</div>
                                   <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{sub.subjectAmharic} · {sub.teacherName}</div>
-                                  {managed && <span className="inline-block mt-0.5 px-1.5 rounded text-[9px] font-bold bg-slate-100 text-slate-500">Edited in teacher gradebook</span>}
                                 </td>
-                                {cells.map(([field, max], cIdx) => (
-                                  <td key={field} className="border-b border-slate-100 group-hover:bg-slate-50 py-1.5 px-1 text-center">
-                                    {managed ? (
-                                      <span className="inline-block w-14 text-center font-mono text-sm text-slate-500" title="Calculated from the teacher gradebook">{Math.round(sub[field] * 10) / 10}</span>
-                                    ) : (
-                                      <MarkInput
-                                        key={`${live.id}-${sub.subjectId}-${field}`}
-                                        value={sub[field]} max={max} row={rIdx} col={cIdx}
-                                        label={`${live.fullName}, ${sub.subjectName}, ${field}, out of ${max}`}
-                                        onCommit={(n) => handleStudentMarkEdit(live.id, sub.subjectId, field, n)}
-                                      />
-                                    )}
+                                {cells.map((field) => (
+                                  <td key={field} className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-1 text-center">
+                                    <span className="inline-block w-14 text-center font-mono text-sm font-semibold text-slate-800 tabular-nums">
+                                      {sub[field] ? Math.round(sub[field] * 10) / 10 : <span className="text-slate-300">–</span>}
+                                    </span>
                                   </td>
                                 ))}
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3">
