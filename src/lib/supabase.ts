@@ -4,6 +4,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getStudentCteTrack } from '../utils/sectionUtils';
 import { RegisteredStudent2019, TimetableSlot } from '../utils/registrationAndTimetable';
 import { GradeSection, Teacher, Student } from '../data/schoolData';
 import { AdminUser } from '../components/AdminSignupPage';
@@ -759,6 +760,10 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
 
     return studentsData.map((s: any): Student => {
       const studentMarks = marksByStudent.get(s.student_id) || { 1: [], 2: [] };
+      const semesters: Student['semesters'] = [
+        { semester: 1, subjects: studentMarks[1]?.length > 0 ? studentMarks[1] : [] },
+        { semester: 2, subjects: studentMarks[2]?.length > 0 ? studentMarks[2] : [] }
+      ];
       return {
         id: s.id,
         studentId: s.student_id,
@@ -777,16 +782,9 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         guardianName: s.guardian_name || 'Parent / Guardian',
         guardianPhone: s.guardian_phone || '',
         avatar: s.avatar || '',
-        semesters: [
-          {
-            semester: 1,
-            subjects: studentMarks[1]?.length > 0 ? studentMarks[1] : []
-          },
-          {
-            semester: 2,
-            subjects: studentMarks[2]?.length > 0 ? studentMarks[2] : []
-          }
-        ]
+        // The students table has no CTE column, so recover the track from the saved CTE subject
+        cteSpecialization: getStudentCteTrack({ semesters }) || undefined,
+        semesters
       };
     });
   } catch (e) {

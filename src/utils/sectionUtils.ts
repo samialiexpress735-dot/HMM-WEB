@@ -97,6 +97,40 @@ export function getTeacherRolesForSection(
 }
 
 /**
+ * A student's CTE track (e.g. "Web Design and Development").
+ * The database has no column for it, so after a cloud refresh the field is empty. The track is also saved
+ * in the student's "Career & Technical: <track>" subject, which the database does keep, so recover it from there.
+ */
+export function getStudentCteTrack(s: Pick<Student, 'cteSpecialization' | 'semesters'>): string {
+  if (s.cteSpecialization) return s.cteSpecialization;
+  for (const sem of s.semesters || []) {
+    const sub = sem.subjects?.find((x) => x.subjectId === 'cte');
+    const m = sub?.subjectName?.match(/:\s*(.+)$/);
+    const track = m?.[1]?.trim();
+    if (track && track.toLowerCase() !== 'elective') return track;
+  }
+  return '';
+}
+
+/**
+ * Enrollment numbers to display for a section. Never lower than the students we can actually find in it,
+ * so the number on a card, the roster and the totals always agree.
+ */
+export function getSectionHeadcount(
+  section: GradeSection,
+  sections: GradeSection[],
+  students: Student[]
+): { total: number; male: number; female: number } {
+  const roster = getStudentsForSection(section.section, sections, students);
+  const stored = section.totalStudents || 0;
+  if (roster.length >= stored) {
+    const male = roster.filter((s) => s.gender === 'M').length;
+    return { total: roster.length, male, female: roster.length - male };
+  }
+  return { total: stored, male: section.maleStudents || 0, female: section.femaleStudents || 0 };
+}
+
+/**
  * Filter students belonging to a target section code (handles 9A, 9B, 11-Nat-A, 11-Soc-B, etc.)
  */
 export function getStudentsForSection(
@@ -127,7 +161,7 @@ export function getStudentsForSection(
     if (activeSectionObj?.isCteSection || targetUpper.includes('CTE')) {
       if (s.grade !== targetGrade) return false;
       const targetCte = (activeSectionObj?.cteSpecialization || '').toLowerCase().trim();
-      const studentCte = (s.cteSpecialization || '').toLowerCase().trim();
+      const studentCte = getStudentCteTrack(s).toLowerCase().trim();
       if (targetCte && studentCte) {
         return studentCte.includes(targetCte) || targetCte.includes(studentCte);
       }
@@ -135,7 +169,7 @@ export function getStudentsForSection(
       if (targetUpper.includes('ACC') && (studentCte.includes('account') || studentCte.includes('acc'))) return true;
       if (targetUpper.includes('MKT') && (studentCte.includes('market') || studentCte.includes('mkt'))) return true;
       if (targetUpper.includes('CST') && (studentCte.includes('construct') || studentCte.includes('cst'))) return true;
-      return Boolean(s.cteSpecialization);
+      return Boolean(studentCte);
     }
 
     // 1. Direct allocatedSection match (e.g. from registrar allocation)

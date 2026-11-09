@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
 import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
-import { getStudentsForSection as getStudentsForSectionUtil } from '../utils/sectionUtils';
+import { getStudentsForSection as getStudentsForSectionUtil, getSectionHeadcount } from '../utils/sectionUtils';
 import { getSectionCapacity } from '../utils/sectionCapacity';
 import { currentEcLabel } from '../utils/ethiopianCalendar';
 
@@ -142,9 +142,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
     !a.teacherId || (a.teacherName || '').toLowerCase().includes('unassigned') || (a.teacherName || '').includes('ያልተመደበ');
 
   // Summary calculations
-  const totalStudents = sections.reduce((acc, s) => acc + s.totalStudents, 0);
-  const totalMale = sections.reduce((acc, s) => acc + s.maleStudents, 0);
-  const totalFemale = sections.reduce((acc, s) => acc + s.femaleStudents, 0);
+  // One source for every enrollment number on this page (never lower than the students found in the section)
+  const head = (sec: GradeSection) => getSectionHeadcount(sec, sections, students);
+  const totalStudents = sections.reduce((acc, s) => acc + head(s).total, 0);
+  const totalMale = sections.reduce((acc, s) => acc + head(s).male, 0);
+  const totalFemale = sections.reduce((acc, s) => acc + head(s).female, 0);
   const avgAttendance = sections.length > 0
     ? (sections.reduce((acc, s) => acc + s.attendanceToday, 0) / sections.length).toFixed(1)
     : '0.0';
@@ -569,7 +571,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-600">
                             <span className="inline-flex items-center gap-1">
                               <Users className="h-3.5 w-3.5 text-emerald-700" />
-                              {sec.totalStudents}
+                              {head(sec).total}
                               {!sec.isCteSection && <span className="text-slate-400">/ {getSectionCapacity(sec)}</span>}
                             </span>
                             <span className="inline-flex items-center gap-1">
@@ -606,8 +608,9 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
             ))
         ) : (
           [openSection].map((sec) => {
-          const malePct = Math.round((sec.maleStudents / sec.totalStudents) * 100);
-          const femalePct = 100 - malePct;
+          const hc = head(sec);
+          const malePct = hc.total > 0 ? Math.round((hc.male / hc.total) * 100) : 0;
+          const femalePct = hc.total > 0 ? 100 - malePct : 0;
           const sectionStudents = getStudentsForSection(sec);
 
           return (
@@ -660,14 +663,14 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       </div>
                       <div className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                         <Users className="w-4 h-4 text-emerald-700" />
-                        <span>{sec.totalStudents}</span>
+                        <span>{hc.total}</span>
                         {!sec.isCteSection && (
                           <span className="text-xs font-semibold text-slate-400">
                             / {getSectionCapacity(sec)} {lang === 'am' ? 'መቀመጫ' : 'seats'}
                           </span>
                         )}
                         <span className="text-xs font-semibold text-slate-500">
-                          (M: {sec.maleStudents} • F: {sec.femaleStudents})
+                          (M: {hc.male} • F: {hc.female})
                         </span>
                       </div>
                     </div>
@@ -687,7 +690,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                 </div>
 
                 {/* Enrollment Distribution Bar */}
-                <div className="mt-3 w-full bg-slate-100 h-2 rounded-full overflow-hidden flex" title={`Male: ${sec.maleStudents} (${malePct}%) | Female: ${sec.femaleStudents} (${femalePct}%)`}>
+                <div className="mt-3 w-full bg-slate-100 h-2 rounded-full overflow-hidden flex" title={`Male: ${hc.male} (${malePct}%) | Female: ${hc.female} (${femalePct}%)`}>
                   <div className="bg-emerald-600 h-full" style={{ width: `${malePct}%` }} />
                   <div className="bg-amber-500 h-full" style={{ width: `${femalePct}%` }} />
                 </div>
@@ -844,7 +847,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                 <div className="text-xs text-slate-500 font-medium">
                   {lang === 'am'
                     ? `የክፍል ${sec.section} ሙሉ የተማሪዎች ዝርዝር እና ውጤቶች ለመመልከት ይጫኑ`
-                    : `View full roster of ${sec.totalStudents} students and inspect their marks across all subjects`}
+                    : `View full roster of ${hc.total} students and inspect their marks across all subjects`}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -1113,7 +1116,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
               {/* Class summary strip */}
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {[
-                  { k: 'Students', v: String(roster.length), tone: 'text-slate-900' },
+                  { k: 'Students', v: String(Math.max(roster.length, head(rosterModalSection).total)), tone: 'text-slate-900' },
                   { k: 'Class average', v: classAvg !== null ? `${classAvg}%` : '–', tone: 'text-emerald-700' },
                   { k: 'Top average', v: topAvg !== null ? `${topAvg}%` : '–', tone: 'text-slate-900' },
                   { k: 'Below 50%', v: String(below), tone: below ? 'text-rose-700' : 'text-slate-900' }
@@ -1134,7 +1137,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
-                      value={deskQuery} onChange={(e) => setDeskQuery(e.target.value)} placeholder={`Search ${roster.length} students…`}
+                      value={deskQuery} onChange={(e) => setDeskQuery(e.target.value)} placeholder={`Search ${roster.length} ${roster.length === 1 ? 'student' : 'students'}…`}
                       className="w-full h-9 pl-8 pr-3 rounded-full border border-slate-200 bg-white text-xs focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none"
                     />
                   </div>
@@ -1167,7 +1170,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                     <div className="p-8 text-center text-xs text-slate-500">
                       <Users className="w-7 h-7 text-slate-300 mx-auto mb-2" />
                       {roster.length === 0
-                        ? <>This section has <strong>{rosterModalSection.totalStudents}</strong> students in the registry, but none are loaded here yet.</>
+                        ? <>This section has <strong>{head(rosterModalSection).total}</strong> {head(rosterModalSection).total === 1 ? 'student' : 'students'} in the registry, but the student {head(rosterModalSection).total === 1 ? 'file is' : 'files are'} not linked to this class yet.</>
                         : 'No student matches your search.'}
                     </div>
                   )}
