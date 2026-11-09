@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Layers,
   Users,
@@ -42,7 +42,7 @@ interface GradesOfYearPageProps {
   onUpdateSection: (updated: GradeSection) => void;
   teachers: Teacher[];
   students: Student[];
-  onUpdateStudents?: (updated: Student[]) => void;
+  onUpdateStudents?: (updated: Student[] | ((prev: Student[]) => Student[])) => void;
   lang: 'en' | 'am';
   onNavigateToTeacherPortal?: (sectionCode?: string, subjectId?: string) => void;
   onNavigateToGradePortal?: () => void;
@@ -90,6 +90,65 @@ export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string
   return tSub.includes(sId) || sName.includes(tSub);
 }
 
+/** Mark input for the Marks Desk. Typing stays local; it saves once on Enter / blur / arrow keys,
+ *  is capped at the maximum, and never fights the cursor (no instant re-render while typing). */
+const MarkInput: React.FC<{
+  value: number; max: number; row: number; col: number; label: string; onCommit: (n: number) => void;
+}> = ({ value, max, row, col, label, onCommit }) => {
+  const show = (v: number) => (v === 0 ? '' : String(v));
+  const [draft, setDraft] = useState<string>(show(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setDraft(show(value)); }, [value]);
+
+  const num = draft === '' ? 0 : Number(draft);
+  const invalid = draft !== '' && (isNaN(num) || num > max);
+  const commit = () => {
+    focused.current = false;
+    if (draft === '') { if (value !== 0) onCommit(0); return; }
+    if (isNaN(num)) { setDraft(show(value)); return; }
+    const c = Math.max(0, Math.min(max, num));
+    setDraft(show(c));
+    if (c !== value) onCommit(c);
+  };
+  const move = (r: number, c: number) =>
+    (document.querySelector(`[data-mark="${r}:${c}"]`) as HTMLInputElement | null)?.focus();
+
+  return (
+    <input
+      data-mark={`${row}:${col}`}
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder="–"
+      aria-label={label}
+      aria-invalid={invalid}
+      title={invalid ? `Maximum is ${max}` : `Out of ${max}`}
+      onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+      onChange={(e) => { if (/^\d*\.?\d*$/.test(e.target.value)) setDraft(e.target.value); }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); commit(); move(row + 1, col); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); commit(); move(row - 1, col); }
+        else if (e.key === 'Escape') { setDraft(show(value)); e.currentTarget.blur(); }
+      }}
+      className={`w-14 h-9 text-center font-mono text-sm rounded-lg border outline-none transition-colors ${
+        invalid
+          ? 'border-rose-400 bg-rose-50 text-rose-700 ring-2 ring-rose-200'
+          : draft === ''
+          ? 'border-dashed border-slate-300 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200'
+          : 'border-slate-200 bg-white text-slate-900 font-semibold focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200'
+      }`}
+    />
+  );
+};
+
+const gradeTone = (letter: string) =>
+  letter.startsWith('A') ? { chip: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-500' }
+  : letter.startsWith('B') ? { chip: 'bg-sky-100 text-sky-800', bar: 'bg-sky-500' }
+  : letter.startsWith('C') ? { chip: 'bg-amber-100 text-amber-800', bar: 'bg-amber-400' }
+  : letter.startsWith('D') ? { chip: 'bg-orange-100 text-orange-800', bar: 'bg-orange-400' }
+  : { chip: 'bg-rose-100 text-rose-800', bar: 'bg-rose-500' };
+
 export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   sections,
   onUpdateSection,
@@ -120,6 +179,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
   // Section Students & Marks Modal State
   const [rosterModalSection, setRosterModalSection] = useState<GradeSection | null>(null);
   const [selectedStudentForMarks, setSelectedStudentForMarks] = useState<Student | null>(null);
+  const [deskQuery, setDeskQuery] = useState('');
   const [activeSubjectTab, setActiveSubjectTab] = useState<string>('all');
 
   const [saveToast, setSaveToast] = useState<string>('');
@@ -267,7 +327,9 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
     return getStudentsForSectionUtil(section.section, sections, students);
   };
 
-  // Handle mark change for a student in the modal
+  // Handle mark change for a student in the modal.
+  // Functional update (always builds on the latest list) + capped at each field's maximum.
+  const MARK_MAX = { continuousAssessment: 30, midExam: 20, finalExam: 50 } as const;
   const handleStudentMarkEdit = (
     studentId: string,
     subjectId: string,
@@ -275,30 +337,21 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
     val: number
   ) => {
     if (!onUpdateStudents) return;
-
-    const updatedList = students.map((st) => {
-      if (st.id !== studentId) return st;
-      const semesters = st.semesters.map((sem) => {
-        if (sem.semester !== 1) return sem;
-        const subjects = sem.subjects.map((sub) => {
-          if (sub.subjectId !== subjectId) return sub;
-          return {
-            ...sub,
-            [field]: Math.max(0, val)
-          };
-        });
-        return { ...sem, subjects };
-      });
-      return { ...st, semesters };
-    });
-
-    onUpdateStudents(updatedList);
-
-    // Also update currently inspected student
-    const current = updatedList.find((s) => s.id === studentId);
-    if (current) {
-      setSelectedStudentForMarks(current);
-    }
+    const safe = Math.max(0, Math.min(MARK_MAX[field], Number(val) || 0));
+    onUpdateStudents((prev) =>
+      prev.map((st) => {
+        if (st.id !== studentId) return st;
+        const target = st.semesters.find((sem) => sem.semester === 1) || st.semesters[0];
+        return {
+          ...st,
+          semesters: st.semesters.map((sem) =>
+            sem !== target
+              ? sem
+              : { ...sem, subjects: sem.subjects.map((sub) => (sub.subjectId !== subjectId ? sub : { ...sub, [field]: safe })) }
+          )
+        };
+      })
+    );
   };
 
   return (
@@ -1083,309 +1136,235 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
       )}
 
       {/* MODAL 3: Section Roster & Specific Student Subject Marks Modal */}
-      {rosterModalSection && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-3xl max-w-5xl w-full p-5 sm:p-7 border border-slate-200 shadow-2xl relative max-h-[92vh] flex flex-col">
-            <button
-              onClick={() => {
-                setRosterModalSection(null);
-                setSelectedStudentForMarks(null);
-              }}
-              className="absolute top-5 right-5 p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      {rosterModalSection && (() => {
+        const sem1Of = (st: Student) => st.semesters.find((x) => x.semester === 1) || st.semesters[0];
+        const avgOf = (st: Student): number | null => {
+          const subs = sem1Of(st)?.subjects || [];
+          if (!subs.length) return null;
+          const t = subs.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
+          return Math.round((t / subs.length) * 10) / 10;
+        };
+        const closeDesk = () => { setRosterModalSection(null); setSelectedStudentForMarks(null); setDeskQuery(''); };
+        const roster = getStudentsForSection(rosterModalSection);
+        const q = deskQuery.trim().toLowerCase();
+        const shown = q
+          ? roster.filter((st) => st.fullName.toLowerCase().includes(q) || st.studentId.toLowerCase().includes(q) || (st.fullNameAmharic || '').includes(deskQuery.trim()))
+          : roster;
+        const avgs = roster.map(avgOf).filter((x): x is number => x !== null);
+        const classAvg = avgs.length ? Math.round((avgs.reduce((a, b) => a + b, 0) / avgs.length) * 10) / 10 : null;
+        const topAvg = avgs.length ? Math.max(...avgs) : null;
+        const below = avgs.filter((x) => x < 50).length;
+        // Always show the live record (never a stale copy) so every number matches the saved marks
+        const live = selectedStudentForMarks ? roster.find((x) => x.id === selectedStudentForMarks.id) || selectedStudentForMarks : null;
+        const liveSubjects = live ? sem1Of(live)?.subjects || [] : [];
+        const liveAvg = live ? avgOf(live) : null;
+        const liveTotal = liveSubjects.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
+        const passed = liveSubjects.filter((x) => calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam) >= 50).length;
+        const medal = (r?: number) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : '');
 
+        return (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5" onClick={closeDesk}>
+          <div className="bg-white rounded-3xl max-w-6xl w-full border border-slate-200 shadow-2xl relative max-h-[94vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <span className="p-3 bg-emerald-800 text-amber-400 rounded-2xl shadow-sm">
-                  <GraduationCap className="w-6 h-6" />
-                </span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-black text-slate-900">
-                      Section {rosterModalSection.section} Students & Marks Desk
-                    </h3>
-                    <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded-full font-bold text-xs">
-                      {rosterModalSection.stream}
-                    </span>
+            <div className="px-5 sm:px-7 pt-5 pb-4 border-b border-slate-200 bg-gradient-to-b from-slate-50 to-white">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="p-3 bg-emerald-800 text-amber-400 rounded-2xl shadow-sm shrink-0">
+                    <GraduationCap className="w-6 h-6" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg sm:text-xl font-black text-slate-900">Section {rosterModalSection.section} · Marks Desk</h3>
+                      <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded-full font-bold text-xs">{rosterModalSection.stream}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">Pick a student, type a mark and press <kbd className="px-1 rounded bg-white border border-slate-300 font-mono">Enter</kbd> to save and move down.</p>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any student to view or edit their exact marks across all subjects (Math, Physics, English, Chemistry, Biology, etc.)
-                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button type="button" onClick={() => window.print()} title="Print section record" className="btn-academic hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer">
+                    <Printer className="w-3.5 h-3.5" /> {lang === 'am' ? 'አትም' : 'Print'}
+                  </button>
+                  <button onClick={closeDesk} aria-label="Close" className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer border border-slate-300 transition-colors"
-                  title="Print official section record and student mark roster"
-                >
-                  <Printer className="w-4 h-4 text-slate-600" />
-                  <span>{lang === 'am' ? 'የክፍል ሪከርድ አትም' : 'Print Section Record'}</span>
-                </button>
+              {/* Class summary strip */}
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {[
+                  { k: 'Students', v: String(roster.length), tone: 'text-slate-900' },
+                  { k: 'Class average', v: classAvg !== null ? `${classAvg}%` : '–', tone: 'text-emerald-700' },
+                  { k: 'Top average', v: topAvg !== null ? `${topAvg}%` : '–', tone: 'text-slate-900' },
+                  { k: 'Below 50%', v: String(below), tone: below ? 'text-rose-700' : 'text-slate-900' }
+                ].map((c) => (
+                  <div key={c.k} className="rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{c.k}</div>
+                    <div className={`font-display font-bold text-lg leading-tight ${c.tone}`}>{c.v}</div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Split View: Left Student Roster, Right Marks Card */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 overflow-hidden min-h-0">
-              {/* Left Column: Student List (4 cols) */}
-              <div className="lg:col-span-5 flex flex-col border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
-                <div className="p-3 bg-slate-100 border-b border-slate-200 font-extrabold text-xs text-slate-700 flex items-center justify-between">
-                  <span>Enrolled Students ({getStudentsForSection(rosterModalSection).length})</span>
-                  <span className="text-[10px] text-slate-500 font-normal">Select to view marks</span>
+            {/* Split view */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 p-4 sm:p-5 flex-1 overflow-hidden min-h-0">
+              {/* Roster */}
+              <div className="lg:col-span-5 flex flex-col border border-slate-200 rounded-2xl overflow-hidden bg-white min-h-[220px]">
+                <div className="p-2.5 border-b border-slate-200 bg-slate-50">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      value={deskQuery} onChange={(e) => setDeskQuery(e.target.value)} placeholder={`Search ${roster.length} students…`}
+                      className="w-full h-9 pl-8 pr-3 rounded-full border border-slate-200 bg-white text-xs focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none"
+                    />
+                  </div>
                 </div>
-
                 <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-                  {getStudentsForSection(rosterModalSection).length > 0 ? (
-                    getStudentsForSection(rosterModalSection).map((st) => {
-                      const isSelected = selectedStudentForMarks?.id === st.id;
-                      return (
-                        <div
-                          key={st.id}
-                          onClick={() => setSelectedStudentForMarks(st)}
-                          className={`p-3 flex items-center justify-between cursor-pointer transition-colors ${
-                            isSelected
-                              ? 'bg-emerald-50 border-l-4 border-emerald-600'
-                              : 'hover:bg-slate-100/70'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <img
-                              src={st.avatar}
-                              alt=""
-                              className="w-9 h-9 rounded-xl object-cover border border-slate-200 flex-shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="font-bold text-slate-900 text-xs truncate">
-                                {st.fullName}
-                              </div>
-                              <span className="text-[11px] text-slate-400 block truncate">
-                                ID: {st.studentId} • Conduct: <strong>{st.conduct}</strong>
-                              </span>
-                              {st.cteSpecialization && (
-                                <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
-                                  🛠️ CTE: {st.cteSpecialization}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="text-right flex-shrink-0">
-                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
-                              Rank #{st.rank}
-                            </span>
-                          </div>
+                  {shown.length > 0 ? shown.map((st) => {
+                    const isSel = live?.id === st.id;
+                    const av = avgOf(st);
+                    const tone = av === null ? null : gradeTone(getEthiopianLetterGrade(av).letter);
+                    return (
+                      <button
+                        key={st.id} type="button" onClick={() => setSelectedStudentForMarks(st)}
+                        className={`w-full text-left p-3 flex items-center gap-3 cursor-pointer transition-colors border-l-4 ${isSel ? 'bg-emerald-50 border-emerald-600' : 'border-transparent hover:bg-slate-50'}`}
+                      >
+                        {st.avatar
+                          ? <img src={st.avatar} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0" />
+                          : <span className="avatar-monogram w-10 h-10 rounded-full text-xs shrink-0">{st.fullName.split(' ').map((n) => n[0]).slice(0, 2).join('')}</span>}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-slate-900 text-xs truncate">{st.fullName}</div>
+                          <div className="text-[11px] text-slate-400 truncate font-mono">{st.studentId}</div>
+                          {st.cteSpecialization && <span className="inline-block mt-0.5 px-1.5 rounded text-[10px] font-bold bg-violet-50 text-violet-800 border border-violet-200">CTE · {st.cteSpecialization}</span>}
                         </div>
-                      );
-                    })
-                  ) : (
-                    <div className="p-6 text-center text-xs text-slate-500">
-                      <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                      <p>
-                        This section currently has <strong>{rosterModalSection.totalStudents}</strong> students recorded in the MoE registry database.
-                      </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Full individual interactive mark entry is enabled for all enrolled classes.
-                      </p>
+                        <div className="text-right shrink-0 space-y-1">
+                          <div className="text-[11px] font-bold text-slate-700">{medal(st.rank)} #{st.rank}</div>
+                          {tone && av !== null && <span className={`inline-block px-2 py-0.5 rounded-md font-mono font-bold text-[10px] ${tone.chip}`}>{av}%</span>}
+                        </div>
+                      </button>
+                    );
+                  }) : (
+                    <div className="p-8 text-center text-xs text-slate-500">
+                      <Users className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+                      {roster.length === 0
+                        ? <>This section has <strong>{rosterModalSection.totalStudents}</strong> students in the registry, but none are loaded here yet.</>
+                        : 'No student matches your search.'}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Right Column: Selected Student's Marks Breakdown Across All Subjects (7 cols) */}
-              <div className="lg:col-span-7 flex flex-col border border-slate-200 rounded-2xl overflow-hidden bg-white">
-                {selectedStudentForMarks ? (
+              {/* Marks card */}
+              <div className="lg:col-span-7 flex flex-col border border-slate-200 rounded-2xl overflow-hidden bg-white min-h-[260px]">
+                {live ? (
                   <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* Student Top Mini Banner */}
-                    <div className="p-4 bg-gradient-to-r from-slate-900 to-emerald-950 text-white flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={selectedStudentForMarks.avatar}
-                          alt=""
-                          className="w-12 h-12 rounded-xl object-cover border-2 border-amber-400 shadow-sm"
-                        />
-                        <div>
-                          <div className="font-black text-sm text-white">
-                            {selectedStudentForMarks.fullName}
-                          </div>
-                          <div className="text-[11px] text-emerald-200">
-                            {selectedStudentForMarks.fullNameAmharic} • {selectedStudentForMarks.studentId}
-                          </div>
-                          <div className="text-[10px] text-slate-300 mt-0.5">
-                            Grade {selectedStudentForMarks.grade} &quot;{selectedStudentForMarks.section}&quot; • Homeroom: {selectedStudentForMarks.homeroomTeacher}
+                    <div className="p-4 bg-gradient-to-r from-slate-900 to-emerald-950 text-white">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {live.avatar
+                            ? <img src={live.avatar} alt="" className="w-12 h-12 rounded-full object-cover border-2 border-amber-400 shrink-0" />
+                            : <span className="avatar-monogram w-12 h-12 rounded-full text-sm shrink-0">{live.fullName.split(' ').map((n) => n[0]).slice(0, 2).join('')}</span>}
+                          <div className="min-w-0">
+                            <div className="font-black text-sm truncate">{live.fullName}</div>
+                            <div className="text-[11px] text-emerald-200 truncate">{live.fullNameAmharic} · {live.studentId}</div>
+                            <div className="text-[10px] text-slate-300 truncate">Grade {live.grade} “{live.section}” · Homeroom: {live.homeroomTeacher}</div>
                           </div>
                         </div>
+                        <span className="text-xs font-bold text-amber-300 bg-amber-400/20 px-2.5 py-1 rounded-full border border-amber-400/30 shrink-0">{medal(live.rank)} Rank #{live.rank}</span>
                       </div>
-
-                      <div className="text-right">
-                        <span className="text-xs font-bold text-amber-300 bg-amber-400/20 px-2.5 py-1 rounded-lg border border-amber-400/30">
-                          Rank #{selectedStudentForMarks.rank}
-                        </span>
-                        <div className="text-[11px] text-slate-300 mt-1">
-                          Attendance: {selectedStudentForMarks.attendanceRate}%
-                        </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        {[
+                          { k: 'Total', v: `${Math.round(liveTotal * 10) / 10}/${liveSubjects.length * 100}` },
+                          { k: 'Average', v: liveAvg !== null ? `${liveAvg}%` : '–' },
+                          { k: 'Passed', v: `${passed}/${liveSubjects.length}` }
+                        ].map((c) => (
+                          <div key={c.k} className="rounded-xl bg-white/10 border border-white/10 py-1.5">
+                            <div className="text-[9px] uppercase tracking-wider text-slate-300">{c.k}</div>
+                            <div className="font-mono font-bold text-sm">{c.v}</div>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
-                    {/* All Subjects Marks Table */}
-                    <div className="p-4 flex-1 overflow-y-auto space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-extrabold text-slate-900">
-                          Semester 1 Official Subject Marks (Continuous 30% + Mid 20% + Final 50% = 100%)
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          Editable inputs
-                        </span>
-                      </div>
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-[11px] text-slate-500 flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700">Semester 1 · Assessment 30 + Mid 20 + Final 50 = 100</span>
+                      <span className="hidden sm:inline">Changes save instantly</span>
+                    </div>
 
-                      <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs">
-                        <div className="bg-slate-100/80 p-2.5 font-bold text-slate-600 grid grid-cols-12 text-[11px] uppercase tracking-wider">
-                          <span className="col-span-4">Subject & Instructor</span>
-                          <span className="col-span-2 text-center">Assess (30)</span>
-                          <span className="col-span-2 text-center">Mid (20)</span>
-                          <span className="col-span-2 text-center">Final (50)</span>
-                          <span className="col-span-2 text-right">Total / Grade</span>
-                        </div>
-
-                        {selectedStudentForMarks.semesters[0]?.subjects.map((sub) => {
-                          const total = calculateTotalScore(
-                            sub.continuousAssessment,
-                            sub.midExam,
-                            sub.finalExam
-                          );
-                          const gradeObj = getEthiopianLetterGrade(total);
-                          const letter = gradeObj.letter;
-
-                          return (
-                            <div
-                              key={sub.subjectId}
-                              className="p-2.5 grid grid-cols-12 items-center hover:bg-slate-50 transition-colors"
-                            >
-                              <div className="col-span-4 min-w-0 pr-1">
-                                <div className="font-bold text-slate-900 truncate">
-                                  {sub.subjectName}
-                                </div>
-                                <span className="text-[10px] text-slate-400 block truncate">
-                                  {sub.subjectAmharic} • {sub.teacherName}
-                                </span>
-                              </div>
-
-                              {/* Continuous Assessment input */}
-                              <div className="col-span-2 text-center px-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={30}
-                                  value={sub.continuousAssessment}
-                                  onChange={(e) =>
-                                    handleStudentMarkEdit(
-                                      selectedStudentForMarks.id,
-                                      sub.subjectId,
-                                      'continuousAssessment',
-                                      parseInt(e.target.value, 10) || 0
-                                    )
-                                  }
-                                  className="w-12 text-center py-1 bg-slate-50 border border-slate-300 rounded font-bold text-slate-900 text-xs focus:ring-1 focus:ring-emerald-500"
-                                />
-                              </div>
-
-                              {/* Mid Exam input */}
-                              <div className="col-span-2 text-center px-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={20}
-                                  value={sub.midExam}
-                                  onChange={(e) =>
-                                    handleStudentMarkEdit(
-                                      selectedStudentForMarks.id,
-                                      sub.subjectId,
-                                      'midExam',
-                                      parseInt(e.target.value, 10) || 0
-                                    )
-                                  }
-                                  className="w-12 text-center py-1 bg-slate-50 border border-slate-300 rounded font-bold text-slate-900 text-xs focus:ring-1 focus:ring-emerald-500"
-                                />
-                              </div>
-
-                              {/* Final Exam input */}
-                              <div className="col-span-2 text-center px-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={50}
-                                  value={sub.finalExam}
-                                  onChange={(e) =>
-                                    handleStudentMarkEdit(
-                                      selectedStudentForMarks.id,
-                                      sub.subjectId,
-                                      'finalExam',
-                                      parseInt(e.target.value, 10) || 0
-                                    )
-                                  }
-                                  className="w-12 text-center py-1 bg-slate-50 border border-slate-300 rounded font-bold text-slate-900 text-xs focus:ring-1 focus:ring-emerald-500"
-                                />
-                              </div>
-
-                              {/* Total & Ethiopian Letter Grade */}
-                              <div className="col-span-2 text-right">
-                                <span className="font-black text-slate-900 text-sm">
-                                  {total}
-                                </span>
-                                <span
-                                  className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-black ${
-                                    letter === 'A'
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : letter === 'B'
-                                      ? 'bg-blue-100 text-blue-800'
-                                      : letter === 'C'
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : 'bg-rose-100 text-rose-800'
-                                  }`}
-                                >
-                                  {letter}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                    <div className="flex-1 overflow-auto">
+                      <table className="w-full text-xs border-separate border-spacing-0">
+                        <thead>
+                          <tr className="text-slate-600">
+                            <th className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-left py-2.5 px-4 font-semibold min-w-[150px]">Subject</th>
+                            {[['Assess', 30], ['Mid', 20], ['Final', 50]].map(([n, m]) => (
+                              <th key={n as string} className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 py-2 px-1 text-center font-semibold">
+                                {n}<span className="block text-[10px] font-mono text-slate-400 font-normal">out of {m}</span>
+                              </th>
+                            ))}
+                            <th className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 py-2.5 px-3 text-center font-semibold min-w-[110px]">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {liveSubjects.map((sub, rIdx) => {
+                            const total = calculateTotalScore(sub.continuousAssessment, sub.midExam, sub.finalExam);
+                            const letter = getEthiopianLetterGrade(total).letter;
+                            const tone = gradeTone(letter);
+                            const cells: ['continuousAssessment' | 'midExam' | 'finalExam', number][] = [['continuousAssessment', 30], ['midExam', 20], ['finalExam', 50]];
+                            return (
+                              <tr key={sub.subjectId} className="group">
+                                <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-4">
+                                  <div className="font-bold text-slate-900 truncate max-w-[200px]">{sub.subjectName}</div>
+                                  <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{sub.subjectAmharic} · {sub.teacherName}</div>
+                                </td>
+                                {cells.map(([field, max], cIdx) => (
+                                  <td key={field} className="border-b border-slate-100 group-hover:bg-slate-50 py-1.5 px-1 text-center">
+                                    <MarkInput
+                                      key={`${live.id}-${sub.subjectId}-${field}`}
+                                      value={sub[field]} max={max} row={rIdx} col={cIdx}
+                                      label={`${live.fullName}, ${sub.subjectName}, ${field}, out of ${max}`}
+                                      onCommit={(n) => handleStudentMarkEdit(live.id, sub.subjectId, field, n)}
+                                    />
+                                  </td>
+                                ))}
+                                <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className="font-mono font-bold text-sm tabular-nums text-slate-900">{total}</span>
+                                      <span className="h-1 w-14 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true">
+                                        <span className={`block h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, total)}%` }} />
+                                      </span>
+                                    </div>
+                                    <span className={`inline-block min-w-9 text-center px-2 py-1 rounded-lg font-mono font-bold text-[11px] ${tone.chip}`}>{letter}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 ) : (
                   <div className="p-8 text-center text-xs text-slate-500 my-auto">
                     <Award className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                    <p className="font-bold text-slate-700">Select a student from the left roster</p>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Their comprehensive marks across all subjects will appear here.
-                    </p>
+                    <p className="font-bold text-slate-700">Select a student from the roster</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Their marks for every subject will appear here.</p>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-3">
-              <span className="text-[11px] text-slate-500">
-                FDRE MoE Secondary Grading Standard (50% Pass Threshold, Conduct Rating A-D)
-              </span>
-              <button
-                onClick={() => {
-                  setRosterModalSection(null);
-                  setSelectedStudentForMarks(null);
-                }}
-                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-3 px-5 sm:px-7 py-3.5 border-t border-slate-200 bg-slate-50">
+              <span className="text-[11px] text-slate-500">FDRE MoE Secondary Grading Standard · 50% pass threshold</span>
+              <button onClick={closeDesk} className="btn-academic px-5 py-2 bg-slate-950 hover:bg-slate-800 text-white rounded-full text-xs font-bold cursor-pointer">
                 Close Desk
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

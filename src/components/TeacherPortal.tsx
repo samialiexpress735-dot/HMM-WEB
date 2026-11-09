@@ -97,7 +97,7 @@ export const DEFAULT_ASSESSMENT_COLUMNS: AssessmentColumn[] = [
 
 interface TeacherPortalProps {
   students: Student[];
-  onUpdateStudents: (updated: Student[]) => void;
+  onUpdateStudents: (updated: Student[] | ((prev: Student[]) => Student[])) => void;
   teachers: Teacher[];
   sections?: GradeSection[];
   lang: 'en' | 'am';
@@ -801,7 +801,8 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       localStorage.setItem(storageKey, String(clamped));
     } catch {}
 
-    const updated = students.map((st) => {
+    // Functional update: always builds on the latest student list, so two quick edits can never overwrite each other.
+    onUpdateStudents((prev) => prev.map((st) => {
       if (st.id !== studentId) return st;
 
       const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
@@ -812,25 +813,19 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
           (selectedSubjectId === 'ict' && s.subjectId === 'it')
       );
 
+      // FIX: freeze what every column currently shows BEFORE the summary totals are rewritten below.
+      // Columns that were never typed into read their value back from those totals, so without this
+      // snapshot editing one cell silently changed the others.
       const existingCustom = (existingSubject as any)?.customAssessments || {};
-      const updatedCustom = { ...existingCustom, [colId]: clamped };
+      const frozen: Record<string, number> = {};
+      assessmentColumns.forEach((c) => { frozen[c.id] = getStudentColumnScore(st, c.id); });
+      const updatedCustom: Record<string, number> = { ...existingCustom, ...frozen, [colId]: clamped };
 
-      // Calculate new total and scale to standard fields
       const regularCols = assessmentColumns.filter((c) => !c.isBonus);
       const bonusCols = assessmentColumns.filter((c) => c.isBonus);
       const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
 
-      const regScore = regularCols.reduce((sum, c) => {
-        const val = c.id === colId ? clamped : (updatedCustom[c.id] ?? getStudentColumnScore(st, c.id));
-        return sum + val;
-      }, 0);
-
-      const bonusScore = bonusCols.reduce((sum, c) => {
-        const val = c.id === colId ? clamped : (updatedCustom[c.id] ?? getStudentColumnScore(st, c.id));
-        return sum + val;
-      }, 0);
-
-      const totalEarned = regScore + bonusScore;
+      const totalEarned = [...regularCols, ...bonusCols].reduce((sum, c) => sum + (updatedCustom[c.id] ?? 0), 0);
       const percentage = maxPossible > 0 ? (totalEarned / maxPossible) * 100 : totalEarned;
 
       const continuousScore = Math.min(30, Math.round((percentage * 0.3) * 10) / 10);
@@ -867,19 +862,12 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       }
 
       const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
-      let updatedSemesters;
-      if (hasSemester) {
-        updatedSemesters = st.semesters.map((sem) =>
-          sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem
-        );
-      } else {
-        updatedSemesters = [...st.semesters, { semester: selectedSemester, subjects: newSubjects }];
-      }
+      const updatedSemesters = hasSemester
+        ? st.semesters.map((sem) => (sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem))
+        : [...st.semesters, { semester: selectedSemester, subjects: newSubjects }];
 
       return { ...st, semesters: updatedSemesters };
-    });
-
-    onUpdateStudents(updated);
+    }));
   };
 
   // Attendance: saved on this device first, then synced to Supabase (see hooks/useAttendance.ts)
