@@ -1309,21 +1309,28 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                             const total = calculateTotalScore(sub.continuousAssessment, sub.midExam, sub.finalExam);
                             const letter = getEthiopianLetterGrade(total).letter;
                             const tone = gradeTone(letter);
+                            // Marks typed column-by-column in the teacher gradebook are managed there (one source of truth)
+                            const managed = !!sub.customAssessments && Object.keys(sub.customAssessments).length > 0;
                             const cells: ['continuousAssessment' | 'midExam' | 'finalExam', number][] = [['continuousAssessment', 30], ['midExam', 20], ['finalExam', 50]];
                             return (
                               <tr key={sub.subjectId} className="group">
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-4">
                                   <div className="font-bold text-slate-900 truncate max-w-[200px]">{sub.subjectName}</div>
                                   <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{sub.subjectAmharic} · {sub.teacherName}</div>
+                                  {managed && <span className="inline-block mt-0.5 px-1.5 rounded text-[9px] font-bold bg-slate-100 text-slate-500">Edited in teacher gradebook</span>}
                                 </td>
                                 {cells.map(([field, max], cIdx) => (
                                   <td key={field} className="border-b border-slate-100 group-hover:bg-slate-50 py-1.5 px-1 text-center">
-                                    <MarkInput
-                                      key={`${live.id}-${sub.subjectId}-${field}`}
-                                      value={sub[field]} max={max} row={rIdx} col={cIdx}
-                                      label={`${live.fullName}, ${sub.subjectName}, ${field}, out of ${max}`}
-                                      onCommit={(n) => handleStudentMarkEdit(live.id, sub.subjectId, field, n)}
-                                    />
+                                    {managed ? (
+                                      <span className="inline-block w-14 text-center font-mono text-sm text-slate-500" title="Calculated from the teacher gradebook">{Math.round(sub[field] * 10) / 10}</span>
+                                    ) : (
+                                      <MarkInput
+                                        key={`${live.id}-${sub.subjectId}-${field}`}
+                                        value={sub[field]} max={max} row={rIdx} col={cIdx}
+                                        label={`${live.fullName}, ${sub.subjectName}, ${field}, out of ${max}`}
+                                        onCommit={(n) => handleStudentMarkEdit(live.id, sub.subjectId, field, n)}
+                                      />
+                                    )}
                                   </td>
                                 ))}
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3">

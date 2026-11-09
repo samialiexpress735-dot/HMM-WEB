@@ -36,6 +36,8 @@ export interface Student {
       continuousAssessment: number; // /30
       midExam: number;              // /20
       finalExam: number;            // /50
+      /** Per-column marks typed in the teacher gradebook (the single source of truth when present). */
+      customAssessments?: Record<string, number>;
     }[];
   }[];
 }

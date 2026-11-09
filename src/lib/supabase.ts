@@ -751,7 +751,8 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
           teacherName: m.teacher_name || 'Faculty',
           continuousAssessment: Number(m.continuous_assessment || 0),
           midExam: Number(m.mid_exam || 0),
-          finalExam: Number(m.final_exam || 0)
+          finalExam: Number(m.final_exam || 0),
+          customAssessments: m.custom_assessments && typeof m.custom_assessments === 'object' ? m.custom_assessments : undefined
         });
       });
     }
@@ -793,6 +794,9 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
     return null;
   }
 }
+
+// Set once if the database has no custom_assessments column yet
+let customMarksColumnMissing = false;
 
 export async function syncActiveStudentToCloud(student: Student): Promise<boolean> {
   const client = getSupabaseClient();
@@ -837,15 +841,22 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
             continuous_assessment: sub.continuousAssessment,
             mid_exam: sub.midExam,
             final_exam: sub.finalExam,
+            custom_assessments: sub.customAssessments ?? null,
             updated_at: new Date().toISOString()
           });
         });
       });
 
       if (marksPayload.length > 0) {
-        await client.from('student_marks').upsert(marksPayload, {
-          onConflict: 'student_id,subject_id,semester'
-        });
+        const write = (rows: any[]) => client.from('student_marks').upsert(rows, { onConflict: 'student_id,subject_id,semester' });
+        // Per-column marks need the custom_assessments column (supabase/add_custom_assessments.sql).
+        // If it has not been added yet, save the totals anyway so nothing is lost.
+        let res = customMarksColumnMissing ? { error: { message: 'skip' } } : await write(marksPayload);
+        if (res.error) {
+          customMarksColumnMissing = true;
+          res = await write(marksPayload.map(({ custom_assessments, ...rest }) => rest));
+        }
+        if (res.error) console.warn('Marks upsert error:', res.error);
       }
     }
 

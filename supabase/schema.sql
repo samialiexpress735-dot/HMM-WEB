@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS student_marks (
   final_exam NUMERIC(4,1) DEFAULT 0 CHECK (final_exam BETWEEN 0 AND 50),
   total_score NUMERIC(5,1) GENERATED ALWAYS AS (continuous_assessment + mid_exam + final_exam) STORED,
   letter_grade CHAR(1),
+  custom_assessments JSONB,
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_student_subject_semester UNIQUE (student_id, subject_id, semester)
 );

@@ -736,11 +736,22 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
         (selectedSubjectId === 'ict' && s.subjectId === 'it')
     );
 
+    // 1) The marks saved with the student (also stored in the database)
     const customMap = (subject as any)?.customAssessments;
     if (customMap && typeof customMap[colId] === 'number') {
       return customMap[colId];
     }
 
+    // 2) Backup of ALL columns kept on this device (covers a database without the custom_assessments column)
+    try {
+      const snap = localStorage.getItem(`hmm_marks_${student.id}_sem${selectedSemester}_${selectedSubjectId}`);
+      if (snap) {
+        const parsed = JSON.parse(snap);
+        if (parsed && typeof parsed[colId] === 'number') return parsed[colId];
+      }
+    } catch {}
+
+    // 3) Older single-cell backup
     try {
       const storageKey = `hmm_score_${student.id}_sem${selectedSemester}_${selectedSubjectId}_${colId}`;
       const raw = localStorage.getItem(storageKey);
@@ -749,7 +760,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       }
     } catch {}
 
-    // Fallbacks to standard fields
+    // 4) First time only (nothing typed yet): estimate from the old summary totals. Saved the moment any cell is edited.
     if (colId === 'quiz1') {
       return Math.min(10, Math.round((subject?.continuousAssessment ?? 0) * (10 / 30)));
     }
@@ -820,6 +831,9 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
       const frozen: Record<string, number> = {};
       assessmentColumns.forEach((c) => { frozen[c.id] = getStudentColumnScore(st, c.id); });
       const updatedCustom: Record<string, number> = { ...existingCustom, ...frozen, [colId]: clamped };
+      try {
+        localStorage.setItem(`hmm_marks_${st.id}_sem${selectedSemester}_${selectedSubjectId}`, JSON.stringify(updatedCustom));
+      } catch {}
 
       const regularCols = assessmentColumns.filter((c) => !c.isBonus);
       const bonusCols = assessmentColumns.filter((c) => c.isBonus);

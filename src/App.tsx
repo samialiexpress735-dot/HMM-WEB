@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroBanner } from './components/HeroBanner';
 import { StudentGradePortal } from './components/StudentGradePortal';
+import { mergeCloudStudents } from './utils/marksMerge';
 import { TeacherPortal } from './components/TeacherPortal';
 import { AdminPortal } from './components/AdminPortal';
 import { AcademicCalendar } from './components/AcademicCalendar';
@@ -75,6 +76,9 @@ export default function App() {
   // Active section & subject for teacher suite navigation
   const [activeTeacherSection, setActiveTeacherSection] = useState<string>('9A');
   const [activeTeacherSubject, setActiveTeacherSubject] = useState<string>('math');
+
+  // When each student was last edited on THIS device (protects fresh typing from a stale cloud refresh)
+  const localEditAt = useRef<Map<string, number>>(new Map());
 
   // Application Data States (initialized empty or from localStorage for user additions)
   const [students, setStudents] = useState<Student[]>(() => {
@@ -235,7 +239,9 @@ export default function App() {
         try {
           applyCloudList('teachers', await fetchTeachersFromCloud(), setTeachers);
           applyCloudList('sections', await fetchSectionsFromCloud(), setSections);
-          applyCloudList('students', await fetchStudentsFromCloud(), setStudents);
+          applyCloudList('students', await fetchStudentsFromCloud(), (rows) =>
+            setStudents((prev) => mergeCloudStudents(prev, rows, localEditAt.current))
+          );
         } catch (e) {
           console.warn('Background cloud sync error:', e);
         }
@@ -388,6 +394,7 @@ export default function App() {
         const prevById = new Map(prev.map((st) => [st.id, st]));
         next.forEach((st) => {
           if (prevById.get(st.id) !== st) {
+            localEditAt.current.set(st.id, Date.now());
             syncActiveStudentToCloud(st).catch(() => {});
           }
         });
