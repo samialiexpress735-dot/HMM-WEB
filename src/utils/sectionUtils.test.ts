@@ -55,3 +55,11 @@ test('a teacher with no assignments gets no sections (no school-wide access)', (
   const secs = [{ section: '9A', homeroomTeacher: { id: 't1', name: 'Other' }, subjectAssignments: [] }] as unknown as GradeSection[];
   assert.deepEqual(getSectionsAssignedToTeacher(t, secs), []);
 });
+
+test('teacher subjects follow the department, and CTE lists the four tracks', async () => {
+  const { getSubjectsForDepartment } = await import('../data/schoolData');
+  assert.ok(getSubjectsForDepartment('Natural Sciences').some((s) => s.value === 'Physics'));
+  assert.ok(!getSubjectsForDepartment('Natural Sciences').some((s) => s.value === 'History'));
+  assert.deepEqual(getSubjectsForDepartment('Languages').map((s) => s.value), ['English Language', 'Amharic']);
+  assert.equal(getSubjectsForDepartment('CTE').length, 4);
+});

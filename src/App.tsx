@@ -407,7 +407,10 @@ export default function App() {
 
     // Auto-select their subject if recognized
     const s = teacher.subject.toLowerCase();
-    if (s.includes('math')) setActiveTeacherSubject('math');
+    if (s.startsWith('cte') || s.includes('career')) setActiveTeacherSubject('cte');
+    else if (s.includes('physical education') || s.includes('sport')) setActiveTeacherSubject('pe');
+    else if (s.includes('agri')) setActiveTeacherSubject('agri');
+    else if (s.includes('math')) setActiveTeacherSubject('math');
     else if (s.includes('phys')) setActiveTeacherSubject('phys');
     else if (s.includes('chem')) setActiveTeacherSubject('chem');
     else if (s.includes('bio')) setActiveTeacherSubject('bio');

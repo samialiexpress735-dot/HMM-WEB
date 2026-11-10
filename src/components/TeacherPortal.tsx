@@ -349,7 +349,10 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
   React.useEffect(() => {
     if (activeTeacherUser) {
       const subj = (activeTeacherUser.subject || '').toLowerCase();
-      if (subj.includes('math')) setSelectedSubjectId('math');
+      if (subj.startsWith('cte') || subj.includes('career')) setSelectedSubjectId('cte');
+      else if (subj.includes('physical education') || subj.includes('sport')) setSelectedSubjectId('pe');
+      else if (subj.includes('agri')) setSelectedSubjectId('agri');
+      else if (subj.includes('math')) setSelectedSubjectId('math');
       else if (subj.includes('phys')) setSelectedSubjectId('phys');
       else if (subj.includes('chem')) setSelectedSubjectId('chem');
       else if (subj.includes('bio')) setSelectedSubjectId('bio');

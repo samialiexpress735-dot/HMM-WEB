@@ -35,7 +35,7 @@ import {
   FileText,
   Globe
 } from 'lucide-react';
-import { Teacher, Student, GradeSection, SchoolEvent, SchoolAnnouncement } from '../data/schoolData';
+import { Teacher, Student, GradeSection, SchoolEvent, SchoolAnnouncement, TEACHER_DEPARTMENTS, getSubjectsForDepartment } from '../data/schoolData';
 import { UserAccount, generateStaffPassword, generateStudentPasscode } from '../utils/authUtils';
 import { getSectionsAssignedToTeacher, getStudentsForSection } from '../utils/sectionUtils';
 import {
@@ -946,14 +946,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             (t.department && t.department.toLowerCase().includes(q)) ||
             (t.phone && t.phone.toLowerCase().includes(q));
 
-          const natSciSubjects = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'ICT'];
+          const natSciSubjects = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'Agriculture', 'ICT'];
           const socSciSubjects = ['Geography', 'History', 'Civics', 'Economics'];
           const langSubjects = ['English Language', 'English', 'Amharic'];
 
           const matchesDept = staffDeptFilter === 'all' ||
             (staffDeptFilter === 'Natural Sciences' && (t.department === 'Natural Sciences' || natSciSubjects.includes(t.subject))) ||
             (staffDeptFilter === 'Social Sciences' && (t.department === 'Social Sciences' || socSciSubjects.includes(t.subject))) ||
-            (staffDeptFilter === 'Languages' && (t.department === 'Languages' || langSubjects.includes(t.subject)));
+            (staffDeptFilter === 'Languages' && (t.department === 'Languages' || langSubjects.includes(t.subject))) ||
+            (staffDeptFilter === 'Physical Education' && (t.department === 'Physical Education' || (t.subject || '').toLowerCase().includes('physical education'))) ||
+            (staffDeptFilter === 'CTE' && (t.department === 'CTE' || (t.subject || '').startsWith('CTE')));
 
           return matchesSearch && matchesDept;
         });
@@ -1084,32 +1086,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       <label className="font-semibold text-slate-700 block mb-1">Department:</label>
                       <select
                         value={teacherDepartment}
-                        onChange={(e) => setTeacherDepartment(e.target.value)}
+                        onChange={(e) => {
+                          const dept = e.target.value;
+                          setTeacherDepartment(dept);
+                          // The subject list follows the department; start on its first subject
+                          setTeacherSubject(getSubjectsForDepartment(dept)[0]?.value || '');
+                        }}
                         className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-2 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                       >
-                        <option value="Natural Sciences">Natural Sciences (የተፈጥሮ ሳይንስ)</option>
-                        <option value="Social Sciences">Social Sciences (የማህበራዊ ሳይንስ)</option>
-                        <option value="Languages">Languages (ቋንቋዎች)</option>
+                        {TEACHER_DEPARTMENTS.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.labelEn} ({d.labelAm})
+                          </option>
+                        ))}
                       </select>
                     </div>
 
                     <div>
-                      <label className="font-semibold text-slate-700 block mb-1">Primary Subject:</label>
+                      <label className="font-semibold text-slate-700 block mb-1">
+                        {teacherDepartment === 'CTE' ? 'CTE Track (የCTE ዘርፍ):' : 'Primary Subject:'}
+                      </label>
                       <select
                         value={teacherSubject}
                         onChange={(e) => setTeacherSubject(e.target.value)}
                         className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-2 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
                       >
-                        <option value="Mathematics">Mathematics</option>
-                        <option value="Physics">Physics</option>
-                        <option value="Chemistry">Chemistry</option>
-                        <option value="Biology">Biology</option>
-                        <option value="English Language">English Language</option>
-                        <option value="Amharic">Amharic</option>
-                        <option value="Geography">Geography</option>
-                        <option value="History">History</option>
-                        <option value="Civics">Civics</option>
-                        <option value="ICT">ICT</option>
+                        {getSubjectsForDepartment(teacherDepartment).map((sub) => (
+                          <option key={sub.value} value={sub.value}>
+                            {sub.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
 
@@ -1316,6 +1322,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     }`}
                   >
                     Languages
+                  </button>
+                  <button
+                    onClick={() => setStaffDeptFilter('Physical Education')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                      staffDeptFilter === 'Physical Education'
+                        ? 'bg-rose-700 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Physical Education
+                  </button>
+                  <button
+                    onClick={() => setStaffDeptFilter('CTE')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                      staffDeptFilter === 'CTE'
+                        ? 'bg-violet-700 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    CTE
                   </button>
                   <button
                     onClick={() => setStaffDeptFilter('Admin')}

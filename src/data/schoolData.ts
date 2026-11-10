@@ -245,6 +245,66 @@ export const CTE_SPECIALIZATION_OPTIONS = [
 
 export type CTESpecialization = typeof CTE_SPECIALIZATION_OPTIONS[number]['labelEn'];
 
+/**
+ * Teacher departments and the subjects a teacher of that department can be registered for.
+ * The CTE department lists the four CTE tracks; the stored subject reads "CTE: <track>".
+ */
+export type TeacherDepartment = 'Natural Sciences' | 'Social Sciences' | 'Languages' | 'Physical Education' | 'CTE';
+
+export const TEACHER_DEPARTMENTS: {
+  id: TeacherDepartment;
+  labelEn: string;
+  labelAm: string;
+  subjects: { value: string; label: string }[];
+}[] = [
+  {
+    id: 'Natural Sciences', labelEn: 'Natural Sciences', labelAm: 'የተፈጥሮ ሳይንስ',
+    subjects: [
+      { value: 'Mathematics', label: 'Mathematics' },
+      { value: 'Physics', label: 'Physics' },
+      { value: 'Chemistry', label: 'Chemistry' },
+      { value: 'Biology', label: 'Biology' },
+      { value: 'Agriculture', label: 'Agriculture' },
+      { value: 'ICT', label: 'ICT' }
+    ]
+  },
+  {
+    id: 'Social Sciences', labelEn: 'Social Sciences', labelAm: 'የማህበራዊ ሳይንስ',
+    subjects: [
+      { value: 'Geography', label: 'Geography' },
+      { value: 'History', label: 'History' },
+      { value: 'Civics', label: 'Civics' },
+      { value: 'Economics', label: 'Economics' }
+    ]
+  },
+  {
+    id: 'Languages', labelEn: 'Languages', labelAm: 'ቋንቋዎች',
+    subjects: [
+      { value: 'English Language', label: 'English Language' },
+      { value: 'Amharic', label: 'Amharic' }
+    ]
+  },
+  {
+    id: 'Physical Education', labelEn: 'Physical Education & Sport', labelAm: 'ስፖርት',
+    subjects: [
+      { value: 'Physical Education', label: 'Physical Education (P.E.)' }
+    ]
+  },
+  {
+    id: 'CTE', labelEn: 'CTE (Career & Technical Education)', labelAm: 'የስራና ቴክኒክ (CTE)',
+    subjects: [
+      { value: 'CTE: Web Design and Development', label: 'Web Design and Development' },
+      { value: 'CTE: Marketing', label: 'Marketing' },
+      { value: 'CTE: Accounting', label: 'Accounting' },
+      { value: 'CTE: Construction', label: 'Construction' }
+    ]
+  }
+];
+
+export function getSubjectsForDepartment(dept: string) {
+  return TEACHER_DEPARTMENTS.find((d) => d.id === dept)?.subjects ?? [];
+}
+
 // Grade 9 & 10 (11 Subjects): English, Math, Physics, Chemistry, Biology, Geography, History, PE, Citizenship, Amharic, Economics
 export const STANDARD_GRADE_9_10_SUBJECTS: SectionSubjectAssignment[] = [
   { subjectId: 'eng', subjectName: 'English Language', subjectAmharic: 'እንግሊዝኛ', teacherId: '', teacherName: 'Unassigned', periodsPerWeek: 4 },

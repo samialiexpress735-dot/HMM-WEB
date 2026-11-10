@@ -52,7 +52,7 @@ interface GradesOfYearPageProps {
   onSignOutAdmin?: () => void;
 }
 
-export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string): boolean {
+export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string, cteTrack?: string): boolean {
   const tSub = (teacher.subject || '').toLowerCase().trim();
   const sId = (subjectId || '').toLowerCase().trim();
   const sName = (subjectName || '').toLowerCase().trim();
@@ -74,17 +74,30 @@ export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string
     cte: ['cte', 'ስራና ቴክኒክ', 'career', 'technical']
   };
 
-  let matchedKey = '';
-  for (const [key, keywords] of Object.entries(subjectKeywords)) {
-    if (keywords.some((kw) => sId.includes(kw) || sName.includes(kw))) {
-      matchedKey = key;
-      break;
+  // Physical Education teachers are their own group: "Physical Education" must never count as "Physics"
+  const isPeTeacher = /physical education|sport|ስፖርት/.test(tSub) || tSub === 'pe';
+
+  // Prefer the exact subject id; only fall back to keyword search for unknown ids
+  let matchedKey = sId === 'ict' ? 'it' : subjectKeywords[sId] ? sId : '';
+  if (!matchedKey) {
+    for (const [key, keywords] of Object.entries(subjectKeywords)) {
+      if (keywords.some((kw) => sId.includes(kw) || sName.includes(kw))) {
+        matchedKey = key;
+        break;
+      }
     }
   }
+  if (matchedKey === 'pe') return isPeTeacher;
+  if (isPeTeacher) return false;
 
   if (matchedKey) {
     const validKeywords = subjectKeywords[matchedKey];
-    return validKeywords.some((kw) => tSub.includes(kw));
+    const isCteTeacher = validKeywords.some((kw) => tSub.includes(kw));
+    // A CTE section (e.g. Marketing) can only take the teacher of that CTE track
+    if (matchedKey === 'cte' && isCteTeacher && cteTrack && tSub.includes(':')) {
+      return tSub.includes(cteTrack.toLowerCase().trim());
+    }
+    return isCteTeacher;
   }
 
   return tSub.includes(sId) || sName.includes(tSub);
@@ -980,10 +993,10 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
 
                     <div className="flex-1 space-y-1">
                       {(() => {
-                        const qualifiedTeachers = teachers.filter((t) => isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName));
-                        const otherTeachers = teachers.filter((t) => !isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName));
+                        const qualifiedTeachers = teachers.filter((t) => isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName, subjectReassignSection.cteSpecialization));
+                        const otherTeachers = teachers.filter((t) => !isTeacherQualifiedForSubject(t, sub.subjectId, sub.subjectName, subjectReassignSection.cteSpecialization));
                         const currentAssignedTeacher = teachers.find((t) => t.id === sub.teacherId);
-                        const isCurrentMismatch = Boolean(currentAssignedTeacher && !isTeacherQualifiedForSubject(currentAssignedTeacher, sub.subjectId, sub.subjectName));
+                        const isCurrentMismatch = Boolean(currentAssignedTeacher && !isTeacherQualifiedForSubject(currentAssignedTeacher, sub.subjectId, sub.subjectName, subjectReassignSection.cteSpecialization));
 
                         return (
                           <>
