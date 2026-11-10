@@ -59,6 +59,17 @@ interface GradesOfYearPageProps {
 export const isCteAssignment = (a: Pick<SectionSubjectAssignment, 'subjectId'>) =>
   (a.subjectId || '').toLowerCase() === 'cte';
 
+/** A CTE vocational section (Grade 11 & 12 only). */
+export const isCteVocationalSection = (s: Pick<GradeSection, 'isCteSection' | 'section'>) =>
+  Boolean(s.isCteSection) || (s.section || '').includes('CTE');
+
+/**
+ * The subjects a section page shows. A CTE section shows only its CTE subject; every other section
+ * shows its regular subjects (its CTE slot is not assigned from the sections page).
+ */
+export const getVisibleSectionAssignments = (s: GradeSection): SectionSubjectAssignment[] =>
+  (s.subjectAssignments || []).filter((a) => (isCteVocationalSection(s) ? isCteAssignment(a) : !isCteAssignment(a)));
+
 export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string, cteTrack?: string): boolean {
   const tSub = (teacher.subject || '').toLowerCase().trim();
   const sId = (subjectId || '').toLowerCase().trim();
@@ -806,11 +817,12 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       <BookOpen className="w-4 h-4 text-emerald-700" />
                       <h4 className="font-extrabold text-sm text-slate-900">
                         {lang === 'am'
-                          ? `የሚማሩት የትምህርት አይነቶችና የተመደቡ መምህራን (${sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).length || 0})`
-                          : `Curriculum Subjects & Assigned Faculty (${sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).length || 0} Subjects)`}
+                          ? `የሚማሩት የትምህርት አይነቶችና የተመደቡ መምህራን (${getVisibleSectionAssignments(sec).length})`
+                          : `Curriculum Subjects & Assigned Faculty (${getVisibleSectionAssignments(sec).length} Subjects)`}
                       </h4>
                     </div>
 
+                    {!isCteVocationalSection(sec) && (
                     <button
                       onClick={() => handleOpenSubjectEditor(sec)}
                       className="btn-animated px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition-colors cursor-pointer flex items-center gap-1.5"
@@ -818,11 +830,12 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       <SlidersHorizontal className="w-3.5 h-3.5 text-slate-600" />
                       <span>{lang === 'am' ? 'የመምህራን ምደባ አሻሽል' : 'Edit Subject Faculty'}</span>
                     </button>
+                    )}
                   </div>
 
                   {/* Grid of Subjects & Assigned Teachers */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                    {sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).map((sub) => {
+                    {getVisibleSectionAssignments(sec).map((sub) => {
                       const teacherObj = teachers.find((t) => t.id === sub.teacherId);
                       return (
                         <div
@@ -1088,8 +1101,14 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
       {/* MODAL 3: Section Roster & Specific Student Subject Marks Modal */}
       {rosterModalSection && (() => {
         const sem1Of = (st: Student) => st.semesters.find((x) => x.semester === 1) || st.semesters[0];
-        const avgOf = (st: Student): number | null => {
+        // A CTE section's desk shows only the CTE subject, never the student's other subjects
+        const cteDesk = isCteVocationalSection(rosterModalSection);
+        const deskSubjects = (st: Student) => {
           const subs = sem1Of(st)?.subjects || [];
+          return cteDesk ? subs.filter((x) => x.subjectId === 'cte') : subs;
+        };
+        const avgOf = (st: Student): number | null => {
+          const subs = deskSubjects(st);
           if (!subs.length) return null;
           const t = subs.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
           return Math.round((t / subs.length) * 10) / 10;
@@ -1106,7 +1125,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
         const below = avgs.filter((x) => x < 50).length;
         // Always show the live record (never a stale copy) so every number matches the saved marks
         const live = selectedStudentForMarks ? roster.find((x) => x.id === selectedStudentForMarks.id) || selectedStudentForMarks : null;
-        const liveSubjects = live ? sem1Of(live)?.subjects || [] : [];
+        const liveSubjects = live ? deskSubjects(live) : [];
         const liveAvg = live ? avgOf(live) : null;
         const liveTotal = liveSubjects.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
         const passed = liveSubjects.filter((x) => calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam) >= 50).length;
