@@ -200,8 +200,6 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
     return getSectionsAssignedToTeacher(activeTeacherUser, sections);
   }, [activeTeacherUser, sections]);
 
-  const [sectionFilterMode, setSectionFilterMode] = useState<'assigned' | 'all'>('assigned');
-
   // Class Management States - null indicates teacher is on the Sections Hub
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(initialSubjectId);
@@ -329,6 +327,8 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
     sectionCode: string,
     initialTab: 'marks' | 'attendance' | 'roster' | 'notices' = 'marks'
   ) => {
+    // A teacher can only open sections that are assigned to them
+    if (!assignedSections.some((a) => a.trim().toUpperCase() === sectionCode.trim().toUpperCase())) return;
     setSelectedSection(sectionCode);
     setActiveTab(initialTab);
     const targetSec = sections.find((s) => (s.section || '').toUpperCase() === sectionCode.toUpperCase());
@@ -681,18 +681,44 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
     return getStudentsForSection(selectedSection, sections, students);
   }, [selectedSection, sections, students]);
 
-  // Derived visible sections based on filter mode ('assigned' vs 'all')
+  // A teacher only ever sees the sections assigned to them (no school-wide fallback)
   const visibleSections = React.useMemo(() => {
-    if (sectionFilterMode === 'assigned' && assignedSections.length > 0) {
-      return assignedSections;
+    const seen = new Set<string>();
+    return assignedSections.filter((code) => {
+      const key = code.trim().toUpperCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [assignedSections]);
+
+  // Numbers for the overview strip on the sections hub
+  const { hubTotalStudents, hubSubjectCount, hubHomeroomCount } = React.useMemo(() => {
+    let total = 0;
+    let homerooms = 0;
+    const subjects = new Set<string>();
+    visibleSections.forEach((code) => {
+      const sec = sections.find((x) => (x.section || '').toUpperCase() === code.toUpperCase());
+      total += getStudentsForSection(code, sections, students).length;
+      if (sec && activeTeacherUser) {
+        const r = getTeacherRolesForSection(activeTeacherUser, sec);
+        if (r.isHomeroom) homerooms += 1;
+        r.subjects.forEach((x) => subjects.add(x));
+      }
+    });
+    if (subjects.size === 0 && activeTeacherUser?.subject) subjects.add(activeTeacherUser.subject);
+    return { hubTotalStudents: total, hubSubjectCount: subjects.size, hubHomeroomCount: homerooms };
+  }, [visibleSections, sections, students, activeTeacherUser]);
+
+  // If assignments change while a section is open (admin edit / refresh), leave a section that is no longer theirs
+  React.useEffect(() => {
+    if (
+      selectedSection &&
+      !visibleSections.some((c) => c.toUpperCase() === selectedSection.toUpperCase())
+    ) {
+      setSelectedSection(null);
     }
-    const allSecCodes = sections.map((s) => s.section);
-    return allSecCodes.length > 0
-      ? allSecCodes
-      : assignedSections.length > 0
-      ? assignedSections
-      : ['9A'];
-  }, [sectionFilterMode, assignedSections, sections]);
+  }, [selectedSection, visibleSections]);
 
   // Current active section object and subjects
   const currentSectionObj = selectedSection
@@ -701,7 +727,14 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
 
   const availableSubjects = React.useMemo(() => {
     if (currentSectionObj?.subjectAssignments && currentSectionObj.subjectAssignments.length > 0) {
-      return currentSectionObj.subjectAssignments;
+      // Subject teachers only get the subjects they teach in this section (homeroom-only teachers see all)
+      const mine = currentSectionObj.subjectAssignments.filter(
+        (sa) =>
+          activeTeacherUser &&
+          ((sa.teacherId && sa.teacherId === activeTeacherUser.id) ||
+            (sa.teacherName || '').trim().toLowerCase() === activeTeacherUser.name.trim().toLowerCase())
+      );
+      return mine.length > 0 ? mine : currentSectionObj.subjectAssignments;
     }
     const gr = currentSectionObj?.grade || (selectedSection ? parseInt(selectedSection.replace(/\D/g, ''), 10) : 9) || 9;
     if (gr >= 11) {
@@ -710,7 +743,22 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
         : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
     }
     return STANDARD_GRADE_9_10_SUBJECTS;
-  }, [currentSectionObj, selectedSection]);
+  }, [currentSectionObj, selectedSection, activeTeacherUser]);
+
+  React.useEffect(() => {
+    if (
+      selectedSection &&
+      availableSubjects.length > 0 &&
+      !availableSubjects.some(
+        (x) =>
+          x.subjectId === selectedSubjectId ||
+          (selectedSubjectId === 'it' && x.subjectId === 'ict') ||
+          (selectedSubjectId === 'ict' && x.subjectId === 'it')
+      )
+    ) {
+      setSelectedSubjectId(availableSubjects[0].subjectId);
+    }
+  }, [selectedSection, availableSubjects, selectedSubjectId]);
 
   const currentSubjectObj = availableSubjects.find(
     (s) =>
@@ -1051,44 +1099,42 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
               </p>
             </div>
 
-            {assignedSections.length > 0 && sections.length > assignedSections.length && (
-              <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSectionFilterMode('assigned')}
-                  className={`px-3 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
-                    sectionFilterMode === 'assigned'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Assigned ({assignedSections.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSectionFilterMode('all')}
-                  className={`px-3 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
-                    sectionFilterMode === 'all'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  All School Sections ({sections.length})
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
-        {assignedSections.length === 0 && (
-          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-4 py-3 rounded-xl flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="font-bold">Notice:</span>
-              <span>No section officially assigned to your profile by the Administrator yet. You can access and manage any active school section below:</span>
+        {/* Overview stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: lang === 'am' ? 'የተመደቡ ክፍሎች' : 'My Sections', value: visibleSections.length, icon: Layers, tone: 'text-emerald-700 bg-emerald-50' },
+            { label: lang === 'am' ? 'ጠቅላላ ተማሪዎች' : 'Total Students', value: hubTotalStudents, icon: Users, tone: 'text-sky-700 bg-sky-50' },
+            { label: lang === 'am' ? 'የምሰጣቸው ትምህርቶች' : 'Subjects Taught', value: hubSubjectCount, icon: BookOpen, tone: 'text-violet-700 bg-violet-50' },
+            { label: lang === 'am' ? 'የክፍል ኃላፊነት' : 'Homeroom Classes', value: hubHomeroomCount, icon: Star, tone: 'text-amber-700 bg-amber-50' }
+          ].map((st) => (
+            <div key={st.label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3 shadow-xs">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${st.tone}`}>
+                <st.icon className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xl font-black text-slate-900 leading-none">{st.value}</div>
+                <div className="text-[11px] font-semibold text-slate-500 mt-1 truncate">{st.label}</div>
+              </div>
             </div>
-            <span className="text-[11px] font-semibold text-amber-900 bg-amber-100 px-2.5 py-1 rounded border border-amber-200 shrink-0">
-              School-Wide Access
-            </span>
+          ))}
+        </div>
+
+        {visibleSections.length === 0 && (
+          <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-bold text-slate-900">
+              {lang === 'am' ? 'እስካሁን ምንም ክፍል አልተመደበልዎትም' : 'No sections assigned to you yet'}
+            </h4>
+            <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto">
+              {lang === 'am'
+                ? 'አስተዳዳሪው ክፍሎችን እስኪመድብልዎት ድረስ ምንም ክፍል ማየት አይችሉም። እባክዎ አስተዳዳሪውን ያነጋግሩ።'
+                : 'You can only open the sections the Administrator assigns to you. Please ask the school administrator to assign your classes in "Grades of This Year".'}
+            </p>
           </div>
         )}
 
@@ -1126,14 +1172,15 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-600 mb-4">
-                    <div className="flex items-center gap-2">
-                      <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>
-                        Subject:{' '}
-                        <strong className="text-slate-800">
-                          {roles.subjects.length > 0 ? roles.subjects.join(', ') : activeTeacherUser.subject}
-                        </strong>
-                      </span>
+                    <div className="flex items-start gap-2">
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="flex flex-wrap gap-1">
+                        {(roles.subjects.length > 0 ? roles.subjects : [activeTeacherUser.subject]).map((sub) => (
+                          <span key={sub} className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
+                            {sub}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />

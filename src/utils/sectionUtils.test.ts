@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GradeSection, Student } from '../data/schoolData';
-import { findSectionsWithStaleCounts, getSectionHeadcount, getStudentCteTrack, getStudentsForSection } from './sectionUtils';
+import { getSectionsAssignedToTeacher, findSectionsWithStaleCounts, getSectionHeadcount, getStudentCteTrack, getStudentsForSection } from './sectionUtils';
 
 const cteSection = {
   id: 'c1', section: '12-CTE-WD', grade: 12, sectionLetter: 'WD', isCteSection: true,
@@ -48,4 +48,10 @@ test('stale saved counts are found and corrected; correct ones are left alone', 
   assert.equal(fixed.length, 1);
   assert.deepEqual([fixed[0].totalStudents, fixed[0].maleStudents, fixed[0].femaleStudents], [1, 1, 0]);
   assert.equal(findSectionsWithStaleCounts(fixed, [refreshed]).length, 0);
+});
+
+test('a teacher with no assignments gets no sections (no school-wide access)', () => {
+  const t = { id: 't9', name: 'Unassigned Teacher', sectionsTeaching: ['Not assigned yet'] } as any;
+  const secs = [{ section: '9A', homeroomTeacher: { id: 't1', name: 'Other' }, subjectAssignments: [] }] as unknown as GradeSection[];
+  assert.deepEqual(getSectionsAssignedToTeacher(t, secs), []);
 });
