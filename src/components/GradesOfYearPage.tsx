@@ -52,6 +52,13 @@ interface GradesOfYearPageProps {
   onSignOutAdmin?: () => void;
 }
 
+/**
+ * CTE is a Grade 11 & 12 vocational track. Its teacher is not assigned from the sections edit page,
+ * so the CTE subject is left out of the faculty editor and the unassigned counts (the stored data is untouched).
+ */
+export const isCteAssignment = (a: Pick<SectionSubjectAssignment, 'subjectId'>) =>
+  (a.subjectId || '').toLowerCase() === 'cte';
+
 export function isTeacherQualifiedForSubject(teacher: Teacher, subjectId: string, subjectName: string, cteTrack?: string): boolean {
   const tSub = (teacher.subject || '').toLowerCase().trim();
   const sId = (subjectId || '').toLowerCase().trim();
@@ -560,7 +567,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                     .filter((x) => x.grade === grade)
                     .sort((a, b) => a.section.localeCompare(b.section))
                     .map((sec) => {
-                      const missing = (sec.subjectAssignments || []).filter(isUnassignedTeacher).length;
+                      const missing = (sec.subjectAssignments || []).filter((a) => !isCteAssignment(a) && isUnassignedTeacher(a)).length;
                       const homeroomAssigned = Boolean(sec.homeroomTeacher?.id);
                       return (
                         <button
@@ -799,8 +806,8 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       <BookOpen className="w-4 h-4 text-emerald-700" />
                       <h4 className="font-extrabold text-sm text-slate-900">
                         {lang === 'am'
-                          ? `የሚማሩት የትምህርት አይነቶችና የተመደቡ መምህራን (${sec.subjectAssignments?.length || 0})`
-                          : `Curriculum Subjects & Assigned Faculty (${sec.subjectAssignments?.length || 0} Subjects)`}
+                          ? `የሚማሩት የትምህርት አይነቶችና የተመደቡ መምህራን (${sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).length || 0})`
+                          : `Curriculum Subjects & Assigned Faculty (${sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).length || 0} Subjects)`}
                       </h4>
                     </div>
 
@@ -815,7 +822,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
 
                   {/* Grid of Subjects & Assigned Teachers */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
-                    {sec.subjectAssignments?.map((sub) => {
+                    {sec.subjectAssignments?.filter((a) => !isCteAssignment(a)).map((sub) => {
                       const teacherObj = teachers.find((t) => t.id === sub.teacherId);
                       return (
                         <div
@@ -980,7 +987,14 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
 
             <form onSubmit={handleSaveSubjectAssignments} className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
               <div className="divide-y divide-slate-100">
-                {subjectAssignmentsDraft.map((sub) => (
+                {subjectAssignmentsDraft.filter((a) => !isCteAssignment(a)).length === 0 && (
+                  <p className="py-6 text-center text-slate-500 font-semibold">
+                    {lang === 'am'
+                      ? 'በዚህ ክፍል ውስጥ የሚመደብ የትምህርት መምህር የለም። የCTE መምህር ከዚህ ገጽ አይመደብም።'
+                      : 'No subject teachers to assign for this section. CTE teachers are not assigned from this page.'}
+                  </p>
+                )}
+                {subjectAssignmentsDraft.filter((a) => !isCteAssignment(a)).map((sub) => (
                   <div key={sub.subjectId} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="min-w-0 sm:w-1/3">
                       <div className="font-extrabold text-slate-900 text-xs">
