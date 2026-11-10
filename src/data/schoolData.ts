@@ -12,11 +12,23 @@ export interface Student {
   gender: 'M' | 'F';
   dateOfBirth?: string; // ISO date (YYYY-MM-DD)
   grade: number; // 9, 10, 11, 12
-  section: string; // 'A', 'B', 'C', 'D'
+  section: string; // 'A', 'B', 'C', 'D'. Empty while the student is registered but not yet placed in a class (waiting)
+  /** Full class code, e.g. '9A' or '11-Nat-A'. Empty = waiting. The roster counts are worked out from this. */
+  sectionCode?: string;
   stream?: 'Natural Science' | 'Social Science';
   streamAmharic?: string;
   cteSpecialization?: string;
-  academicYear: string;
+  /** CTE group (Grades 11-12), kept apart from the academic class, e.g. '11-CTE-WD'. */
+  cteSection?: string;
+  /** Which of the student's CTE wishes was granted (1 = first choice). */
+  cteRank?: number;
+  /** 'inactive' = left the school during the year. The record and marks stay; the student leaves every list and count. */
+  status?: 'active' | 'inactive';
+  leftDate?: string; // ISO date
+  leftReason?: string;
+  /** Link to the admission record this student was created from (no cascade: deleting one never deletes the other). */
+  registrationId?: string;
+  academicYear: string; // E.C. year as digits, e.g. '2019'
   avatar?: string;
   rank: number;
   totalStudentsInSection: number;
@@ -190,6 +202,8 @@ export interface SectionSubjectAssignment {
 
 export interface GradeSection {
   id: string;
+  /** E.C. year this class belongs to, e.g. '2019'. '9A' exists once per year. */
+  academicYear?: string;
   grade: number; // 9, 10, 11, 12
   section: string; // '9A', '9B', '10A', '11-Nat-A', etc.
   sectionLetter: string; // 'A', 'B', 'C', 'D'

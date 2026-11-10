@@ -4,11 +4,12 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { getStudentCteTrack } from '../utils/sectionUtils';
 import { RegisteredStudent2019, TimetableSlot } from '../utils/registrationAndTimetable';
 import { GradeSection, Teacher, Student } from '../data/schoolData';
 import { AdminUser } from '../components/AdminSignupPage';
-import { academicYearShort, currentEcLabel, todayISO } from '../utils/ethiopianCalendar';
+import { getAcademicYear, yearDigits } from '../utils/academicYear';
+import { getStudentCteTrack } from '../utils/sectionUtils';
+import { todayISO } from '../utils/ethiopianCalendar';
 
 export function getSupabaseCredentials(): { url: string; key: string } {
   let url =
@@ -487,14 +488,59 @@ export async function syncSubAdminToCloud(subAdmin: SubAdminRecord): Promise<boo
 // ==============================================================================
 
 /** Returns null when the database cannot be reached, so an outage is never mistaken for "no sections". */
-export async function fetchSectionsFromCloud(): Promise<GradeSection[] | null> {
+// ==============================================================================
+// ACADEMIC YEAR + PAGED READS
+// ==============================================================================
+
+/** The year the school is currently running, kept in the database so a rollover reaches every device. */
+export async function fetchCurrentAcademicYear(): Promise<string | null> {
   const client = getSupabaseClient();
   if (!client) return null;
   try {
-    const { data, error } = await client.from('grade_sections').select('*');
+    const { data, error } = await client.from('school_settings').select('value').eq('key', 'current_academic_year').maybeSingle();
     if (error || !data) return null;
+    return yearDigits(data.value) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setCurrentAcademicYearInCloud(year: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client
+      .from('school_settings')
+      .upsert({ key: 'current_academic_year', value: yearDigits(year), updated_at: new Date().toISOString() });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/** Supabase returns at most 1000 rows per request. Read every page so nothing is silently cut off. */
+async function fetchAllRows(build: (from: number, to: number) => any): Promise<any[] | null> {
+  const PAGE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error || !data) return null;
+    rows.push(...data);
+    if (data.length < PAGE) return rows;
+  }
+}
+
+export async function fetchSectionsFromCloud(year: string = getAcademicYear()): Promise<GradeSection[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const data = await fetchAllRows((from, to) =>
+      client.from('grade_sections').select('*').eq('academic_year', year).order('id').range(from, to)
+    );
+    if (!data) return null;
     return data.map((s: any): GradeSection => ({
       id: s.id,
+      academicYear: year,
       grade: s.grade,
       section: s.section_code,
       sectionLetter: s.section_letter,
@@ -536,6 +582,7 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
     const base = {
       id: section.id,
       grade: section.grade,
+      academic_year: yearDigits(section.academicYear, getAcademicYear()),
       section_code: section.section,
       section_letter: section.sectionLetter,
       stream: section.stream,
@@ -583,12 +630,14 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
 // ==============================================================================
 
 /** Returns null when the database cannot be reached. An empty array means it was reached and has no registrations. */
-export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent2019[] | null> {
+export async function fetchRegistrationsFromCloud(year: string = getAcademicYear()): Promise<RegisteredStudent2019[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
   try {
-    const { data, error } = await client.from('registrations_2019').select('*');
-    if (error || !data) return null;
+    const data = await fetchAllRows((from, to) =>
+      client.from('registrations').select('*').eq('academic_year', year).order('id').range(from, to)
+    );
+    if (!data) return null;
     return data.map((r: any): RegisteredStudent2019 => ({
       id: r.id,
       studentId: r.student_id,
@@ -597,7 +646,7 @@ export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent20
       gender: r.gender,
       targetGrade: r.target_grade,
       stream: r.stream,
-      academicYear: r.academic_year || currentEcLabel(),
+      academicYear: yearDigits(r.academic_year, year),
       previousSchool: r.previous_school,
       previousGrade: r.previous_grade,
       previousAverageScore: Number(r.previous_score || 0),
@@ -606,10 +655,7 @@ export async function fetchRegistrationsFromCloud(): Promise<RegisteredStudent20
       conduct: r.conduct || 'A',
       previousSection: undefined,
       cteChoices: r.cte_choices ? String(r.cte_choices).split('|').filter(Boolean) : undefined,
-      cteSpecialization: r.cte_specialization || (r.cte_choices ? String(r.cte_choices).split('|')[0] : undefined),
-      cteRank: r.cte_rank || undefined,
-      cteSection: r.cte_section || undefined,
-      allocatedSection: r.allocated_section,
+      // Where the student was placed lives on the students table, never here.
       registrationDate: r.registration_date,
       avatar: ''
     }));
@@ -668,32 +714,22 @@ async function pushRegistrationToCloud(student: RegisteredStudent2019): Promise<
       gender: student.gender,
       target_grade: student.targetGrade,
       stream: student.stream || null,
-      academic_year: student.academicYear,
+      academic_year: yearDigits(student.academicYear, getAcademicYear()),
       previous_school: student.previousSchool,
       previous_grade: student.previousGrade,
       previous_score: student.previousAverageScore,
       guardian_name: student.guardianName,
       guardian_phone: student.guardianPhone,
       conduct: student.conduct,
-      allocated_section: student.allocatedSection || null,
       registration_date: student.registrationDate,
       avatar: '',
       updated_at: new Date().toISOString()
     };
-    const cte = {
-      cte_choices: student.cteChoices && student.cteChoices.length ? student.cteChoices.join('|') : null,
-      cte_specialization: student.cteSpecialization || null,
-      cte_rank: student.cteRank || null,
-      cte_section: student.cteSection || null
-    };
-    const { error } = await client.from('registrations_2019').upsert({ ...base, ...cte });
+    // Admission data only: the CTE WISHES are an input; the CTE group a student was placed in is on the students table.
+    const cte = { cte_choices: student.cteChoices && student.cteChoices.length ? student.cteChoices.join('|') : null };
+    const { error } = await client.from('registrations').upsert({ ...base, ...cte });
     if (!error) return true;
-    // The CTE columns do not exist until supabase/add_cte_choices.sql has been run. Save everything else anyway.
-    if (/cte_|column/i.test(error.message || '')) {
-      console.warn('CTE columns missing: run supabase/add_cte_choices.sql. Saved without CTE choices.');
-      const retry = await client.from('registrations_2019').upsert(base);
-      return !retry.error;
-    }
+    console.warn('Registration upsert error:', error);
     return false;
   } catch {
     return false;
@@ -706,6 +742,7 @@ export async function syncTimetableSlotToCloud(slot: TimetableSlot): Promise<boo
   try {
     const { error } = await client.from('timetable_slots').upsert({
       id: slot.id,
+      academic_year: getAcademicYear(),
       day: slot.day,
       period: slot.period,
       section_code: slot.sectionCode,
@@ -725,23 +762,32 @@ export async function syncTimetableSlotToCloud(slot: TimetableSlot): Promise<boo
 // 5. ACTIVE STUDENTS & MARKS CLOUD SYNC
 // ==============================================================================
 
-export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
+/**
+ * The roster of ONE academic year (default: the current one), with that year's marks.
+ * Returns null when the database cannot be reached, [] when it was reached and the year has no students.
+ * Pass `withMarks: false` when only names and classes are needed (e.g. last year's records for suggestions).
+ */
+export async function fetchStudentsFromCloud(
+  year: string = getAcademicYear(),
+  options: { withMarks?: boolean } = {}
+): Promise<Student[] | null> {
   const client = getSupabaseClient();
   if (!client) return null;
   try {
-    const { data: studentsData, error: sErr } = await client.from('students').select('*').order('student_id');
-    if (sErr || !studentsData) return null; // unreachable
-    if (studentsData.length === 0) return []; // reachable, and no students
+    const studentsData = await fetchAllRows((from, to) =>
+      client.from('students').select('*').eq('academic_year', year).order('student_id').range(from, to)
+    );
+    if (!studentsData) return null; // unreachable
+    if (studentsData.length === 0) return []; // reachable, and the year has no students
 
-    const { data: marksData } = await client.from('student_marks').select('*');
-
-    // Group marks by student_id and semester
+    // Marks are read for this year only, so a student who studied here before never mixes the years up.
     const marksByStudent = new Map<string, { [semester: number]: any[] }>();
-    if (marksData) {
-      marksData.forEach((m: any) => {
-        if (!marksByStudent.has(m.student_id)) {
-          marksByStudent.set(m.student_id, { 1: [], 2: [] });
-        }
+    if (options.withMarks !== false) {
+      const marksData = await fetchAllRows((from, to) =>
+        client.from('student_marks').select('*').eq('academic_year', year).order('id').range(from, to)
+      );
+      (marksData || []).forEach((m: any) => {
+        if (!marksByStudent.has(m.student_id)) marksByStudent.set(m.student_id, { 1: [], 2: [] });
         const studentSemesters = marksByStudent.get(m.student_id)!;
         const sem = Number(m.semester) || 1;
         if (!studentSemesters[sem]) studentSemesters[sem] = [];
@@ -771,10 +817,19 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         fullNameAmharic: s.full_name_amharic || s.full_name,
         gender: s.gender || 'M',
         grade: Number(s.grade),
-        section: s.section,
+        section: s.section || '',
+        sectionCode: s.section_code || '',
         stream: s.stream,
-        academicYear: s.academic_year || academicYearShort(undefined, 'am'),
-        rank: Number(s.rank || 1),
+        cteSection: s.cte_section || undefined,
+        // The track is saved on the student; older rows only have it in their "Career & Technical: <track>" subject.
+        cteSpecialization: s.cte_specialization || getStudentCteTrack({ semesters }) || undefined,
+        cteRank: s.cte_rank || undefined,
+        status: s.status === 'inactive' ? 'inactive' : 'active',
+        leftDate: s.left_date || undefined,
+        leftReason: s.left_reason || undefined,
+        registrationId: s.registration_id || undefined,
+        academicYear: yearDigits(s.academic_year, year),
+        rank: Number(s.rank || 0),
         totalStudentsInSection: Number(s.total_students_in_section || 40),
         attendanceRate: Number(s.attendance_rate || 95),
         conduct: s.conduct || 'A',
@@ -782,8 +837,6 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
         guardianName: s.guardian_name || 'Parent / Guardian',
         guardianPhone: s.guardian_phone || '',
         avatar: s.avatar || '',
-        // The students table has no CTE column, so recover the track from the saved CTE subject
-        cteSpecialization: getStudentCteTrack({ semesters }) || undefined,
         semesters
       };
     });
@@ -793,14 +846,59 @@ export async function fetchStudentsFromCloud(): Promise<Student[] | null> {
   }
 }
 
-// Set once if the database has no custom_assessments column yet
+/** Every academic year that has students, newest first (used to open a past year read-only). */
+export async function fetchAcademicYearsFromCloud(): Promise<string[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const rows = await fetchAllRows((from, to) => client.from('students').select('academic_year').order('id').range(from, to));
+    if (!rows) return null;
+    const years = new Set<string>();
+    rows.forEach((r: any) => {
+      const y = yearDigits(r.academic_year);
+      if (y) years.add(y);
+    });
+    return [...years].sort((a, b) => b.localeCompare(a));
+  } catch {
+    return null;
+  }
+}
+
+// A student is "unsaved" from the moment they are changed here until the database confirms it (or if the save
+// failed). Such students must survive a reload from the database, and failed ones are sent again.
+const studentsInFlight = new Map<string, number>();
+const studentsFailed = new Set<string>();
+let studentPushSeq = 0;
+
+export function getUnsavedStudentIds(): Set<string> {
+  return new Set<string>([...studentsInFlight.keys(), ...studentsFailed]);
+}
+export function getFailedStudentIds(): Set<string> {
+  return new Set<string>(studentsFailed);
+}
+
+// Set once if the database has no custom_assessments column yet (supabase/add_custom_assessments.sql)
 let customMarksColumnMissing = false;
 
 export async function syncActiveStudentToCloud(student: Student): Promise<boolean> {
+  const ticket = ++studentPushSeq;
+  studentsInFlight.set(student.id, ticket);
+  const ok = await pushStudentToCloud(student);
+  if (studentsInFlight.get(student.id) === ticket) {
+    studentsInFlight.delete(student.id);
+    if (ok) studentsFailed.delete(student.id);
+    else studentsFailed.add(student.id);
+  }
+  return ok;
+}
+
+async function pushStudentToCloud(student: Student): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
-    // 1. Upsert student basic profile
+    const year = yearDigits(student.academicYear, getAcademicYear());
+
+    // 1. The student's row for this year
     const { error: sErr } = await client.from('students').upsert({
       id: student.id,
       student_id: student.studentId,
@@ -808,9 +906,17 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
       full_name_amharic: student.fullNameAmharic || null,
       gender: student.gender,
       grade: student.grade,
-      section: student.section,
+      section: student.section || '', // empty = waiting for a class
+      section_code: student.sectionCode || null,
       stream: student.stream || null,
-      academic_year: student.academicYear,
+      cte_section: student.cteSection || null,
+      cte_specialization: student.cteSpecialization || null,
+      cte_rank: student.cteRank || null,
+      status: student.status === 'inactive' ? 'inactive' : 'active',
+      left_date: student.status === 'inactive' ? student.leftDate || null : null,
+      left_reason: student.status === 'inactive' ? student.leftReason || null : null,
+      registration_id: student.registrationId || null,
+      academic_year: year,
       rank: student.rank,
       attendance_rate: student.attendanceRate,
       conduct: student.conduct || 'A',
@@ -826,35 +932,40 @@ export async function syncActiveStudentToCloud(student: Student): Promise<boolea
       return false;
     }
 
-    // 2. Upsert semester marks
-    if (student.semesters && student.semesters.length > 0) {
-      const marksPayload: any[] = [];
-      student.semesters.forEach((sem) => {
-        sem.subjects?.forEach((sub) => {
-          marksPayload.push({
-            student_id: student.studentId,
-            subject_id: sub.subjectId,
-            subject_name: sub.subjectName,
-            semester: sem.semester,
-            continuous_assessment: sub.continuousAssessment,
-            mid_exam: sub.midExam,
-            final_exam: sub.finalExam,
-            custom_assessments: sub.customAssessments ?? null,
-            updated_at: new Date().toISOString()
-          });
+    // 2. This year's marks
+    const marksPayload: any[] = [];
+    (student.semesters || []).forEach((sem) => {
+      sem.subjects?.forEach((sub) => {
+        marksPayload.push({
+          student_id: student.studentId,
+          academic_year: year,
+          subject_id: sub.subjectId,
+          subject_name: sub.subjectName,
+          semester: sem.semester,
+          continuous_assessment: sub.continuousAssessment,
+          mid_exam: sub.midExam,
+          final_exam: sub.finalExam,
+          custom_assessments: sub.customAssessments ?? null,
+          updated_at: new Date().toISOString()
         });
       });
+    });
+    if (marksPayload.length > 0) {
+      const write = (rows: any[]) =>
+        client.from('student_marks').upsert(rows, { onConflict: 'student_id,academic_year,subject_id,semester' });
+      const withoutCustom = (rows: any[]) => rows.map(({ custom_assessments, ...rest }) => rest);
 
-      if (marksPayload.length > 0) {
-        const write = (rows: any[]) => client.from('student_marks').upsert(rows, { onConflict: 'student_id,subject_id,semester' });
-        // Per-column marks need the custom_assessments column (supabase/add_custom_assessments.sql).
-        // If it has not been added yet, save the totals anyway so nothing is lost.
-        let res = customMarksColumnMissing ? { error: { message: 'skip' } } : await write(marksPayload);
-        if (res.error) {
-          customMarksColumnMissing = true;
-          res = await write(marksPayload.map(({ custom_assessments, ...rest }) => rest));
-        }
-        if (res.error) console.warn('Marks upsert error:', res.error);
+      // Per-column marks need the custom_assessments column (supabase/add_custom_assessments.sql). If the database
+      // says it is not there, remember that and save the totals anyway so nothing is lost. Any other error
+      // (e.g. a dropped connection) does NOT switch per-column marks off.
+      let res = await write(customMarksColumnMissing ? withoutCustom(marksPayload) : marksPayload);
+      if (res.error && !customMarksColumnMissing && /custom_assessments/i.test(res.error.message || '')) {
+        customMarksColumnMissing = true;
+        res = await write(withoutCustom(marksPayload));
+      }
+      if (res.error) {
+        console.warn('Marks upsert error:', res.error);
+        return false;
       }
     }
 
@@ -893,7 +1004,8 @@ export function subscribeToAllSchoolDataRealtime(onSyncRequired: () => void): ()
       .channel('realtime:school-master')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => trigger.call())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'grade_sections' }, () => trigger.call())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'school_settings' }, () => trigger.call())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => trigger.call())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'student_marks' }, () => trigger.call())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_slots' }, () => trigger.call())
@@ -917,7 +1029,7 @@ export function subscribeToRegistrationsRealtime(onChange: () => void): () => vo
     const trigger = debounced(onChange, 500);
     const channel = client
       .channel('realtime:registrations')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations_2019' }, () => trigger.call())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => trigger.call())
       .subscribe();
     return () => {
       trigger.cancel();

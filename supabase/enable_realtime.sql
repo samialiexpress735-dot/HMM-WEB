@@ -7,7 +7,7 @@ DECLARE
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
     FOREACH t IN ARRAY ARRAY[
-      'teachers', 'grade_sections', 'registrations_2019',
+      'teachers', 'grade_sections', 'registrations_2019', 'registrations', 'school_settings',
       'students', 'student_marks', 'timetable_slots', 'attendance_records'
     ]
     LOOP

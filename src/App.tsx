@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroBanner } from './components/HeroBanner';
 import { StudentGradePortal } from './components/StudentGradePortal';
@@ -40,9 +40,15 @@ import {
   syncSectionToCloud,
   fetchStudentsFromCloud,
   syncActiveStudentToCloud,
+  fetchCurrentAcademicYear,
+  setCurrentAcademicYearInCloud,
+  getUnsavedStudentIds,
+  getFailedStudentIds,
   subscribeToAllSchoolDataRealtime,
   isSupabaseConfigured
 } from './lib/supabase';
+import { useAcademicYear, getAcademicYear, setAcademicYear, previousYear, yearDigits } from './utils/academicYear';
+import { isOnRoster, deriveSectionCode, mergeRosterUpdate, stampNewStudents as stampNew } from './utils/rosterView';
 import { getSectionsAssignedToTeacher, findSectionsWithStaleCounts } from './utils/sectionUtils';
 
 export default function App() {
@@ -77,22 +83,47 @@ export default function App() {
   const [activeTeacherSection, setActiveTeacherSection] = useState<string>('9A');
   const [activeTeacherSubject, setActiveTeacherSubject] = useState<string>('math');
 
+  // Application Data States (initialized empty or from localStorage for user additions)
   // When each student was last edited on THIS device (protects fresh typing from a stale cloud refresh)
   const localEditAt = useRef<Map<string, number>>(new Map());
 
   // True once the first load from the database has finished (or there is no database to wait for)
   const [cloudLoaded, setCloudLoaded] = useState(false);
 
-  // Application Data States (initialized empty or from localStorage for user additions)
-  const [students, setStudents] = useState<Student[]>(() => {
+  // The current academic year (E.C. digits). It is kept in the database; this is the last value seen.
+  const academicYear = useAcademicYear();
+
+  // EVERY student of the current year: placed in a class, waiting for a class, or left the school (inactive).
+  // Only the registrar works with all of them; the other portals get the `students` roster below.
+  const [allStudents, setAllStudents] = useState<Student[]>(() => {
     try {
       const saved = localStorage.getItem('hmm_persisted_students');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const year = getAcademicYear();
+        // Rows saved for an earlier year are not this year's roster.
+        return (JSON.parse(saved) as Student[]).filter((st) => yearDigits(st.academicYear, year) === year);
+      }
     } catch {
       // ignore
     }
     return SEED_STUDENTS;
   });
+  // Last year's students: only used to recognise returning students when registering.
+  const [pastStudents, setPastStudents] = useState<Student[]>(() => {
+    try {
+      const saved = localStorage.getItem('hmm_persisted_past_students');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+  // What the portals see: students who are in a class and still at the school.
+  const students = useMemo(() => allStudents.filter(isOnRoster), [allStudents]);
+
+  const allStudentsRef = useRef(allStudents);
+  allStudentsRef.current = allStudents;
+  const sectionsRef = useRef<GradeSection[]>([]);
 
   const [teachers, setTeachers] = useState<Teacher[]>(() => {
     try {
@@ -147,11 +178,19 @@ export default function App() {
   // Sync state changes to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('hmm_persisted_students', JSON.stringify(students));
+      localStorage.setItem('hmm_persisted_students', JSON.stringify(allStudents));
     } catch {
       // ignore
     }
-  }, [students]);
+  }, [allStudents]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('hmm_persisted_past_students', JSON.stringify(pastStudents));
+    } catch {
+      // ignore
+    }
+  }, [pastStudents]);
 
   useEffect(() => {
     try {
@@ -168,6 +207,7 @@ export default function App() {
       // ignore
     }
   }, [sections]);
+  sectionsRef.current = sections;
 
   useEffect(() => {
     try {
@@ -188,6 +228,7 @@ export default function App() {
   // Repair the head counts saved on each section. If students were deleted straight from the database,
   // the numbers saved on the sections still include them. Once the real students have loaded, correct
   // any section whose saved count differs and save the fix so every page and device agrees.
+  // `students` is the roster (placed, still at the school), so waiting and left students are not counted.
   useEffect(() => {
     if (!cloudLoaded) return;
     const stale = findSectionsWithStaleCounts(sections, students);
@@ -234,36 +275,82 @@ export default function App() {
 
     // Automatic silent background load.
     // The database is the truth: a list it returns replaces the local copy, so rows deleted in Supabase
-    // disappear here too. Two safeguards keep local work safe:
+    // disappear here too. Safeguards keep local work safe:
     //  - if the database cannot be reached (null), the local copy is left alone;
     //  - an EMPTY list only clears the local copy if the database has held rows before (i.e. they were
-    //    deleted), never when nothing has been saved to it yet.
-    const applyCloudList = <T,>(name: string, list: T[] | null, apply: (rows: T[]) => void) => {
-      if (list === null) return;
+    //    deleted), never when nothing has been saved to it yet;
+    //  - students whose save has not been confirmed yet are kept, and failed saves are sent again.
+    const shouldApplyCloudList = (name: string, list: unknown[] | null): boolean => {
+      if (list === null) return false;
       const seenKey = `hmm_cloud_has_held_${name}`;
       try {
         if (list.length > 0) {
           localStorage.setItem(seenKey, '1');
-        } else if (localStorage.getItem(seenKey) !== '1') {
-          return;
+          return true;
         }
+        return localStorage.getItem(seenKey) === '1';
       } catch {
-        if (list.length === 0) return;
+        return list.length > 0;
       }
-      apply(list);
+    };
+    const applyCloudList = <T,>(name: string, list: T[] | null, apply: (rows: T[]) => void) => {
+      if (shouldApplyCloudList(name, list)) apply(list as T[]);
     };
 
     async function loadCloudData() {
-      if (isSupabaseConfigured()) {
-        try {
-          applyCloudList('teachers', await fetchTeachersFromCloud(), setTeachers);
-          applyCloudList('sections', await fetchSectionsFromCloud(), setSections);
-          applyCloudList('students', await fetchStudentsFromCloud(), (rows) =>
-            setStudents((prev) => mergeCloudStudents(prev, rows, localEditAt.current))
-          );
-        } catch (e) {
-          console.warn('Background cloud sync error:', e);
+      if (!isSupabaseConfigured()) {
+        setCloudLoaded(true);
+        return;
+      }
+      try {
+        applyCloudList('teachers', await fetchTeachersFromCloud(), setTeachers);
+
+        // 1. Which academic year is running? If another device started a new one, drop the old year's lists.
+        const cloudYear = await fetchCurrentAcademicYear();
+        if (cloudYear && cloudYear !== getAcademicYear()) {
+          setAllStudents([]);
+          setSections([]);
+          setPastStudents([]);
+          try {
+            localStorage.removeItem('hmm_persisted_registered_students');
+            localStorage.removeItem('hmm_persisted_timetable_slots');
+          } catch {
+            // ignore
+          }
+          setAcademicYear(cloudYear);
         }
+        const year = getAcademicYear();
+
+        // 2. This year's classes and students
+        const cloudSections = await fetchSectionsFromCloud(year);
+        const cloudStudents = await fetchStudentsFromCloud(year);
+
+        // Students first, then classes, so the head counts are never checked against a half-loaded roster.
+        if (cloudStudents !== null && shouldApplyCloudList(`students:${year}`, cloudStudents)) {
+          const cloudIds = new Set(cloudStudents.map((st) => st.id));
+          const unsaved = getUnsavedStudentIds();
+          const local = allStudentsRef.current;
+
+          // Students saved here but not (yet) in the database stay visible; failed saves are sent again.
+          const keepLocal = local.filter((st) => !cloudIds.has(st.id) && unsaved.has(st.id));
+          const failed = getFailedStudentIds();
+          keepLocal.filter((st) => failed.has(st.id)).forEach((st) => syncActiveStudentToCloud(st).catch(() => {}));
+
+          // Keep what was just typed on this device and the per-column marks (see marksMerge.ts).
+          const merged = mergeCloudStudents(local, cloudStudents, localEditAt.current);
+          const codeSource = cloudSections ?? sectionsRef.current;
+          setAllStudents([
+            ...merged.map((st) => (st.sectionCode || !st.section ? st : { ...st, sectionCode: deriveSectionCode(st, codeSource) })),
+            ...keepLocal
+          ]);
+        }
+        if (cloudSections !== null && shouldApplyCloudList(`sections:${year}`, cloudSections)) setSections(cloudSections);
+
+        // 3. Last year's records, for recognising returning students
+        const cloudPast = await fetchStudentsFromCloud(previousYear(year));
+        if (cloudPast !== null) setPastStudents(cloudPast);
+      } catch (e) {
+        console.warn('Background cloud sync error:', e);
       }
       setCloudLoaded(true);
     }
@@ -406,21 +493,66 @@ export default function App() {
     });
   };
 
-  const handleUpdateStudents = (updatedStudents: Student[] | ((prev: Student[]) => Student[])) => {
-    setStudents((prev) => {
-      const next = typeof updatedStudents === 'function' ? updatedStudents(prev) : updatedStudents;
-      if (isSupabaseConfigured()) {
-        // Sync only students whose record actually changed (unchanged ones keep the same object reference)
-        const prevById = new Map(prev.map((st) => [st.id, st]));
-        next.forEach((st) => {
-          if (prevById.get(st.id) !== st) {
-            localEditAt.current.set(st.id, Date.now());
-            syncActiveStudentToCloud(st).catch(() => {});
-          }
-        });
+  /** Sends every student whose record changed to the database (unchanged ones keep the same object reference). */
+  const syncChangedStudents = (prev: Student[], next: Student[]) => {
+    if (!isSupabaseConfigured()) return;
+    const prevById = new Map(prev.map((st) => [st.id, st]));
+    next.forEach((st) => {
+      if (prevById.get(st.id) !== st) {
+        localEditAt.current.set(st.id, Date.now());
+        syncActiveStudentToCloud(st).catch(() => {});
       }
+    });
+  };
+
+  const stampNewStudents = (prev: Student[], next: Student[]): Student[] =>
+    stampNew(prev, next, getAcademicYear(), sectionsRef.current);
+
+  // The registrar's handler: sees and changes ALL of this year's students (waiting and left ones included).
+  const handleUpdateAllStudents = (updatedStudents: Student[] | ((prev: Student[]) => Student[])) => {
+    setAllStudents((prev) => {
+      const raw = typeof updatedStudents === 'function' ? updatedStudents(prev) : updatedStudents;
+      const next = stampNewStudents(prev, raw);
+      syncChangedStudents(prev, next);
       return next;
     });
+  };
+
+  // The handler of every other portal: they only see the roster, so rows they cannot see (waiting or left) are
+  // never lost when they save their own list back.
+  const handleUpdateStudents = (updatedStudents: Student[] | ((prev: Student[]) => Student[])) => {
+    setAllStudents((prev) => {
+      const visiblePrev = prev.filter(isOnRoster);
+      const raw = typeof updatedStudents === 'function' ? updatedStudents(visiblePrev) : updatedStudents;
+      const next = mergeRosterUpdate(prev, stampNewStudents(prev, raw));
+      syncChangedStudents(prev, next);
+      return next;
+    });
+  };
+
+  /**
+   * Starts a new academic year. Nothing is deleted: the finished year's students, marks and attendance stay
+   * in the database tagged with their year; the app simply starts working with the new year.
+   */
+  const handleStartNewAcademicYear = async (nextYear: string): Promise<boolean> => {
+    const year = yearDigits(nextYear);
+    if (!year) return false;
+    if (isSupabaseConfigured()) {
+      const ok = await setCurrentAcademicYearInCloud(year);
+      if (!ok) return false;
+    }
+    // The finished year's students are the "previous year" for recognising returning students.
+    setPastStudents(allStudentsRef.current);
+    setAllStudents([]);
+    setSections([]);
+    try {
+      localStorage.removeItem('hmm_persisted_registered_students');
+      localStorage.removeItem('hmm_persisted_timetable_slots');
+    } catch {
+      // ignore
+    }
+    setAcademicYear(year);
+    return true;
   };
 
   const handleNavigateToTeacherPortal = (sectionCode?: string, subjectId?: string) => {
@@ -500,8 +632,10 @@ export default function App() {
               sections={sections}
               onAddSections={handleAddSections}
               onUpdateSection={handleUpdateSection}
-              onUpdateStudents={handleUpdateStudents}
-              previousYearStudents={students}
+              students={allStudents}
+              onUpdateStudents={handleUpdateAllStudents}
+              previousYearStudents={pastStudents}
+              onStartNewAcademicYear={handleStartNewAcademicYear}
               lang={lang}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToTeacher={handleNavigateToTeacherPortal}

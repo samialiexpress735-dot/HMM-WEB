@@ -23,6 +23,7 @@ import {
   evaluateSubjectGrade
 } from '../utils/gradeCalculations';
 import { ReportCardModal } from './ReportCardModal';
+import { formatYear, yearDigits } from '../utils/academicYear';
 
 interface StudentGradePortalProps {
   students: Student[];
@@ -210,7 +211,7 @@ export const StudentGradePortal: React.FC<StudentGradePortalProps> = ({ students
                       {activeStudent.stream} Stream
                     </span>
                   )}
-                  <span>Academic Year: {activeStudent.academicYear}</span>
+                  <span>Academic Year: {formatYear(yearDigits(activeStudent.academicYear, activeStudent.academicYear))}</span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">
                   Homeroom Teacher: <span className="text-slate-200">{activeStudent.homeroomTeacher}</span>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Printer, Award, CheckCircle, Shield, Building2 } from 'lucide-react';
 import { Student } from '../data/schoolData';
+import { formatYear, yearDigits } from '../utils/academicYear';
 import { evaluateSemesterPerformance, evaluateSubjectGrade } from '../utils/gradeCalculations';
 import { formatDualDate } from '../utils/ethiopianCalendar';
 
@@ -82,7 +83,7 @@ export const ReportCardModal: React.FC<ReportCardModalProps> = ({
               </div>
             </div>
             <div className="inline-block bg-slate-100 text-slate-800 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-wider mt-2 border border-slate-300">
-              Official Academic Transcript • Semester {semester} ({student.academicYear})
+              Official Academic Transcript • Semester {semester} ({formatYear(yearDigits(student.academicYear, student.academicYear))})
             </div>
           </div>
 

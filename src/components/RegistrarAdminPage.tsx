@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   UserPlus,
   Search,
@@ -68,11 +68,14 @@ import {
   syncStudentToCloud,
   syncTimetableSlotToCloud,
   fetchRegistrationsFromCloud,
-  fetchSectionsFromCloud,
   getPendingRegistrationIds,
   subscribeToRegistrationsRealtime
 } from '../lib/supabase';
-import { reconcileRegistrations, releaseSeatsOfRemoved } from '../utils/registrationSync';
+import { reconcileRegistrations } from '../utils/registrationSync';
+import { useAcademicYear, getAcademicYear as getYearNow, formatYear, previousYear, yearDigits } from '../utils/academicYear';
+import { buildRegisteredView, newWaitingStudent, placeStudentInClass, nextStudentId, rosterCounts } from '../utils/rosterView';
+import { AcademicYearPanel } from './AcademicYearPanel';
+import { todayISO } from '../utils/ethiopianCalendar';
 import {
   normalizeName,
   studentsToArchive,
@@ -82,7 +85,6 @@ import {
   CteTrack
 } from '../utils/registrarLogic';
 import { Student } from '../data/schoolData';
-import { SCHOOL_INFO } from '../data/schoolInfo';
 import {
   SeatAssignment,
   isAcademicSection,
@@ -94,7 +96,6 @@ import {
   applyAssignmentsToSections,
   nextLetterIndex
 } from '../utils/sectionCapacity';
-import { currentEcLabel, currentEcYear, todayISO } from '../utils/ethiopianCalendar';
 
 interface RegistrarAdminPageProps {
   teachers: Teacher[];
@@ -102,9 +103,13 @@ interface RegistrarAdminPageProps {
   onAddSections: (newSections: GradeSection[]) => void;
   /** Saves one changed class in place (used for seat changes and adding students). */
   onUpdateSection?: (section: GradeSection) => void;
+  /** Every student of the CURRENT year: in a class, waiting for one, or left. Counts are worked out from these. */
+  students?: Student[];
   onUpdateStudents?: (students: any[] | ((prev: any[]) => any[])) => void;
-  /** The school's current students: last year's records used for name suggestions. */
+  /** Last year's students: used for name suggestions and to keep a returning student's school ID. */
   previousYearStudents?: Student[];
+  /** Starts a new academic year (nothing is deleted). Resolves to false if it could not be saved. */
+  onStartNewAcademicYear?: (nextYear: string) => Promise<boolean>;
   lang: 'en' | 'am';
   onNavigateToGrades?: () => void;
   onNavigateToTeacher?: (sectionCode?: string, subjectId?: string) => void;
@@ -118,8 +123,10 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   sections,
   onAddSections,
   onUpdateSection,
+  students = [],
   onUpdateStudents,
   previousYearStudents = [],
+  onStartNewAcademicYear,
   lang,
   onNavigateToGrades,
   onNavigateToTeacher,
@@ -127,19 +134,27 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   onNavigateHome,
   onSignOutAdmin
 }) => {
-  const [activeTab, setActiveTab] = useState<'registration' | 'allocation' | 'timetable'>('registration');
+  const [activeTab, setActiveTab] = useState<'registration' | 'allocation' | 'timetable' | 'year'>('registration');
+  const year = useAcademicYear();
 
   // Archive & 2019 Registrations state
   const [archiveStudents] = useState<ArchiveStudent[]>(PREVIOUS_YEAR_ARCHIVE_STUDENTS);
-  const [registeredStudents, setRegisteredStudents] = useState<RegisteredStudent2019[]>(() => {
+  // Admission records (previous school, score, CTE wishes) of the current year. WHERE a student is placed is not
+  // stored here: it lives on the student's roster row, and the counts below come from the students.
+  const [registrations, setRegistrations] = useState<RegisteredStudent2019[]>(() => {
     try {
       const saved = localStorage.getItem('hmm_persisted_registered_students');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const y = getYearNow();
+        return (JSON.parse(saved) as RegisteredStudent2019[]).filter((r) => yearDigits(r.academicYear, y) === y);
+      }
     } catch {
       // ignore
     }
     return INITIAL_REGISTERED_2019_STUDENTS;
   });
+  const registeredStudents = useMemo(() => buildRegisteredView(registrations, students), [registrations, students]);
+  const counts = useMemo(() => rosterCounts(students), [students]);
 
   // Timetable & Conflict Detection State
   const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>(() => {
@@ -155,11 +170,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Sync registered intake & timetable to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('hmm_persisted_registered_students', JSON.stringify(registeredStudents));
+      localStorage.setItem('hmm_persisted_registered_students', JSON.stringify(registrations));
     } catch {
       // ignore
     }
-  }, [registeredStudents]);
+  }, [registrations]);
 
   useEffect(() => {
     try {
@@ -305,13 +320,11 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Keep this list in step with the database. Registrations saved on other devices appear here, students
-  // deleted in Supabase disappear (and give their class seat back), and only students whose save has not
-  // gone through yet are sent up again.
-  const registeredRef = React.useRef(registeredStudents);
-  registeredRef.current = registeredStudents;
-  const sectionsRef = React.useRef(sections);
-  sectionsRef.current = sections;
+  // Keep the admission records in step with the database: records saved on other devices appear, records
+  // deleted there disappear, and only records whose save has not gone through yet are sent up again.
+  // (Seats and counts do not depend on these: they come from the students.)
+  const registrationsRef = React.useRef(registrations);
+  registrationsRef.current = registrations;
   const cloudSyncBusy = React.useRef(false);
   const cloudSyncQueued = React.useRef(false);
   const cloudSyncRef = React.useRef<() => Promise<void>>(async () => {});
@@ -323,26 +336,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     }
     cloudSyncBusy.current = true;
     try {
-      const rows = await fetchRegistrationsFromCloud();
+      const rows = await fetchRegistrationsFromCloud(year);
       if (rows === null) return; // database unreachable: keep what is on screen
-      const { merged, removed, toUpload } = reconcileRegistrations(registeredRef.current, rows, getPendingRegistrationIds());
-      registeredRef.current = merged;
-      setRegisteredStudents(merged);
+      const { merged, toUpload } = reconcileRegistrations(registrationsRef.current, rows, getPendingRegistrationIds());
+      registrationsRef.current = merged;
+      setRegistrations(merged);
       toUpload.forEach((l) => syncStudentToCloud(l).catch(() => {}));
-
-      if (removed.length > 0) {
-        // Classes keep a saved head count, so give back the seats of the students that are gone.
-        const fresh = await fetchSectionsFromCloud();
-        const base = fresh && fresh.length > 0 ? fresh : sectionsRef.current;
-        releaseSeatsOfRemoved(base, removed).forEach(saveClass);
-        setToast(
-          lang === 'am'
-            ? `${removed.length} ተማሪ(ዎች) በዳታቤዙ ውስጥ ስለሌሉ ከዝርዝሩ ተወግደዋል።`
-            : `${removed.length} student${removed.length === 1 ? '' : 's'} no longer in the database ${
-                removed.length === 1 ? 'was' : 'were'
-              } removed from this list.`
-        );
-      }
     } catch (e) {
       console.warn('Registration sync failed:', e);
     } finally {
@@ -369,7 +368,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       unsubscribe();
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [year]);
 
   // Submit new registration
   const handleRegisterStudent = (e: React.FormEvent) => {
@@ -397,12 +396,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       return;
     }
 
-    const yearNum = parseInt(SCHOOL_INFO.registrationYear, 10) || new Date().getFullYear();
-    const prefix = `HMM-${yearNum}-${targetGrade.toString().padStart(2, '0')}`;
-    const taken = new Set(registeredStudents.map((r) => r.studentId));
-    let n = registeredStudents.length + 1;
-    while (taken.has(`${prefix}${String(n).padStart(2, '0')}`)) n++;
-    const newStudentId = `${prefix}${String(n).padStart(2, '0')}`;
+    // The school ID is permanent: a returning student keeps theirs; a new student gets the next number of the year.
+    const newStudentId = nextStudentId({
+      linkedStudentId: linked?.studentId,
+      year,
+      taken: [...registrations.map((r) => r.studentId), ...students.map((st) => st.studentId)]
+    });
 
     const newStudent: RegisteredStudent2019 = {
       id: `reg-${Date.now()}`,
@@ -414,7 +413,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       stream: targetGrade >= 11 ? targetStream : undefined,
       cteChoices: targetGrade >= 11 ? cteChoices : undefined,
       cteSpecialization: targetGrade >= 11 ? cteChoices[0] : undefined,
-      academicYear: SCHOOL_INFO.registrationYear,
+      academicYear: year,
       previousSchool: previousSchool.trim() || 'Debre Berhan Feeder School',
       previousGrade,
       previousSection,
@@ -426,8 +425,10 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       avatar: ''
     };
 
-    setRegisteredStudents((prev) => [newStudent, ...prev]);
+    // Two records are created together: the admission paperwork, and the student's roster row (no class yet = waiting).
+    setRegistrations((prev) => [newStudent, ...prev]);
     syncStudentToCloud(newStudent).catch(() => {});
+    onUpdateStudents?.((prev: any) => [newWaitingStudent(newStudent, year), ...(Array.isArray(prev) ? prev : [])]);
 
     setFullName('');
     setFullNameAmharic('');
@@ -459,15 +460,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   const placeStudentsInClasses = (assignments: SeatAssignment[]) => {
     if (assignments.length === 0) return;
     const before = registeredStudents;
-    const byStudent = new Map(assignments.map((a) => [a.studentId, a.sectionCode]));
     const updatedSections = applyAssignmentsToSections(sections, assignments, before);
     updatedSections.forEach(saveClass);
-
-    const updatedRegistered = before.map((r) => (byStudent.has(r.id) ? { ...r, allocatedSection: byStudent.get(r.id) } : r));
-    setRegisteredStudents(updatedRegistered);
-    updatedRegistered.forEach((r, i) => {
-      if (r !== before[i]) syncStudentToCloud(r).catch(() => {});
-    });
 
     if (!onUpdateStudents) return;
     const secByCode = new Map(updatedSections.map((sec) => [sec.section.toUpperCase().trim(), sec]));
@@ -484,6 +478,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
     const inClass = (st: any, sec: GradeSection) =>
       st.grade === sec.grade && st.section === sec.sectionLetter && (sec.grade < 11 || st.stream === sec.stream);
 
+    // The class is written onto each student's roster row (the row is updated, never replaced, so marks are kept).
     onUpdateStudents((prev: any) => {
       const prevArr: any[] = Array.isArray(prev) ? prev : [];
       const existingById = new Map(prevArr.map((x) => [x.id, x]));
@@ -491,57 +486,32 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
         const key = sec.section.toUpperCase().trim();
         const rank = (nextRank.get(key) || 0) + 1;
         nextRank.set(key, rank);
-        const stream = sec.grade >= 11 ? (sec.stream as any) : reg.stream;
-        const existing = existingById.get(reg.id);
-        if (existing) {
-          return { ...existing, grade: sec.grade, section: sec.sectionLetter, stream, totalStudentsInSection: sec.totalStudents };
-        }
         const template =
           sec.grade >= 11
             ? sec.stream === 'Social Science'
               ? STANDARD_GRADE_11_12_SOCIAL_SUBJECTS
               : STANDARD_GRADE_11_12_NATURAL_SUBJECTS
             : STANDARD_GRADE_9_10_SUBJECTS;
-        const subjects = template.map((ts) => ({
-          subjectId: ts.subjectId,
-          subjectName: ts.subjectName,
-          subjectAmharic: ts.subjectAmharic || ts.subjectName,
-          teacherName: ts.teacherName || 'Unassigned',
-          continuousAssessment: 0,
-          midExam: 0,
-          finalExam: 0,
-          totalScore: 0
-        }));
-        return {
-          id: reg.id,
-          studentId: reg.studentId,
-          fullName: reg.fullName,
-          fullNameAmharic: reg.fullNameAmharic || reg.fullName,
-          gender: reg.gender,
+        return placeStudentInClass({
+          existing: existingById.get(reg.id),
+          reg,
+          academicYear: year,
           grade: sec.grade,
-          section: sec.sectionLetter,
-          stream,
-          cteSpecialization: reg.cteSection ? reg.cteSpecialization : undefined,
-          academicYear: SCHOOL_INFO.registrationYear,
-          homeroomTeacher: sec.homeroomTeacher?.id ? sec.homeroomTeacher.name : 'To be assigned',
-          guardianName: reg.guardianName || 'Parent/Guardian',
-          guardianPhone: reg.guardianPhone || '+251 91 000 0000',
-          conduct: reg.conduct || 'A',
-          attendanceRate: 100,
+          sectionLetter: sec.sectionLetter,
+          sectionCode: sec.section,
+          stream: sec.grade >= 11 ? sec.stream : reg.stream,
           rank,
-          totalStudentsInSection: sec.totalStudents,
-          semesters: [
-            { semester: 1 as const, subjects },
-            { semester: 2 as const, subjects }
-          ]
-        };
+          totalInSection: sec.totalStudents,
+          homeroom: sec.homeroomTeacher?.id ? sec.homeroomTeacher.name : undefined,
+          template
+        });
       });
       const newIds = new Set(built.map((b) => b.id));
       const kept = prevArr
         .filter((x) => !newIds.has(x.id))
         .map((x) => {
           const sec = updatedSections.find((u) => inClass(x, u));
-          return sec ? { ...x, totalStudentsInSection: sec.totalStudents } : x;
+          return sec && x.totalStudentsInSection !== sec.totalStudents ? { ...x, totalStudentsInSection: sec.totalStudents } : x;
         });
       return [...kept, ...built];
     });
@@ -808,12 +778,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
   // Export Allocation Rosters to Official CSV
   const handleDownloadCsv = () => {
     if (!previewBuckets || previewBuckets.length === 0) return;
-    const csvContent = generateSectionRosterCsv(previewBuckets, SCHOOL_INFO.registrationYear);
+    const csvContent = generateSectionRosterCsv(previewBuckets, formatYear(year));
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_${currentEcYear()}_EC.csv`);
+    link.setAttribute('download', `HMM_Grade_${allocationGrade}_Sections_Roster_${year}_EC.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -870,7 +840,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
         : 'አጠቃላይ 2ኛ ደረጃ';
 
       return {
-        id: `sec-2017-${bucket.sectionCode.toLowerCase()}`,
+        id: `sec-${year}-${bucket.sectionCode.toLowerCase()}`,
+        academicYear: year,
         grade: allocationGrade,
         section: bucket.sectionCode,
         sectionLetter: bucket.sectionLetter,
@@ -920,19 +891,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       });
     });
 
-    const updatedRegistered = registeredStudents.map((s) => {
-      let u = s;
-      if (allocatedMap.has(s.id)) u = { ...u, allocatedSection: allocatedMap.get(s.id) };
-      const c = cteMap.get(s.id);
-      if (c) u = { ...u, cteSpecialization: c.track, cteRank: c.rank, cteSection: c.section };
-      return u;
-    });
-    setRegisteredStudents(updatedRegistered);
-    updatedRegistered.forEach((s, i) => {
-      if (s !== registeredStudents[i]) syncStudentToCloud(s).catch(() => {});
-    });
-
-    // Also convert to active school students with properly initialized subjects (0 initial score)
+    // The class and the CTE group are written onto each student's roster row (never onto the registration), so
+    // the counts follow the students. Rows are updated, not replaced: marks that already exist are kept.
     if (onUpdateStudents) {
       let templateSubjects = STANDARD_GRADE_9_10_SUBJECTS;
       if (allocationGrade >= 11) {
@@ -942,67 +902,29 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             : STANDARD_GRADE_11_12_NATURAL_SUBJECTS;
       }
 
-      const convertedStudents = previewBuckets.filter((b) => !b.isCteSection).flatMap((bucket) => {
-        return bucket.students.map((st, idx) => {
-          const studentSubjects = (bucket.isCteSection
-            ? [
-                {
-                  subjectId: 'cte',
-                  subjectName: `Career & Technical: ${st.cteSpecialization || 'Elective'}`,
-                  subjectAmharic: `የስራና ቴክኒክ፡ ${st.cteSpecialization || 'ሙያ'}`,
-                  teacherName: 'Unassigned',
-                  periodsPerWeek: 4
-                }
-              ]
-            : templateSubjects
-          ).map((ts) => ({
-            subjectId: ts.subjectId,
-            subjectName: ts.subjectName,
-            subjectAmharic: ts.subjectAmharic || ts.subjectName,
-            teacherName: ts.teacherName || 'Unassigned',
-            continuousAssessment: 0,
-            midExam: 0,
-            finalExam: 0,
-            totalScore: 0
-          }));
-
-          return {
-            id: st.id,
-            studentId: st.studentId,
-            fullName: st.fullName,
-            fullNameAmharic: st.fullNameAmharic || st.fullName,
-            gender: st.gender,
-            grade: allocationGrade,
-            section: bucket.sectionLetter,
-            stream: st.stream,
-            cteSpecialization: st.cteSection ? st.cteSpecialization : undefined,
-            academicYear: SCHOOL_INFO.registrationYear,
-            homeroomTeacher: 'To be assigned',
-            guardianName: st.guardianName || 'Parent/Guardian',
-            guardianPhone: st.guardianPhone || '+251 91 000 0000',
-            conduct: st.conduct || 'A',
-            attendanceRate: 100,
-            rank: idx + 1,
-            totalStudentsInSection: bucket.students.length,
-            semesters: [
-              {
-                semester: 1 as const,
-                subjects: studentSubjects
-              },
-              {
-                semester: 2 as const,
-                subjects: studentSubjects
-              }
-            ]
-          };
-        });
-      });
+      const placements = previewBuckets
+        .filter((b) => !b.isCteSection)
+        .flatMap((bucket) => bucket.students.map((st, idx) => ({ bucket, st, idx })));
 
       onUpdateStudents((prev: any) => {
-        const prevArr = Array.isArray(prev) ? prev : [];
-        const newIds = new Set(convertedStudents.map((s) => s.id));
-        const kept = prevArr.filter((s: any) => !newIds.has(s.id));
-        return [...kept, ...convertedStudents];
+        const prevArr: any[] = Array.isArray(prev) ? prev : [];
+        const existingById = new Map(prevArr.map((x) => [x.id, x]));
+        const placed = placements.map(({ bucket, st, idx }) =>
+          placeStudentInClass({
+            existing: existingById.get(st.id),
+            reg: st,
+            academicYear: year,
+            grade: allocationGrade,
+            sectionLetter: bucket.sectionLetter,
+            sectionCode: bucket.sectionCode,
+            stream: st.stream,
+            rank: idx + 1,
+            totalInSection: bucket.students.length,
+            template: templateSubjects
+          })
+        );
+        const placedIds = new Set(placed.map((x) => x.id));
+        return [...prevArr.filter((x) => !placedIds.has(x.id)), ...placed];
       });
 
       // Students already in the school's list keep their section and subjects; they only gain their CTE track.
@@ -1016,6 +938,8 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
             return {
               ...s,
               cteSpecialization: c.track,
+              cteSection: c.section,
+              cteRank: c.rank,
               semesters: (s.semesters || []).map((sem: any) => ({
                 ...sem,
                 subjects: sem.subjects.some((x: any) => x.subjectId === 'cte')
@@ -1033,10 +957,10 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
     setAllocationSuccessMessage(
       lang === 'am'
-        ? `በ${currentEcLabel('am')} ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
+        ? `በ${year} ዓ.ም. ${previewBuckets.length} አዳዲስ ክፍሎች (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) በተሳካ ሁኔታ ተፈጥረዋል!`
-        : `Successfully created ${previewBuckets.length} new ${currentEcLabel('en')} sections (${previewBuckets
+        : `Successfully created ${previewBuckets.length} new ${year} E.C. sections (${previewBuckets
             .map((b) => b.sectionCode)
             .join(', ')}) with room assignments and merit/gender balancing!`
     );
@@ -1219,7 +1143,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
         <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-2xl space-y-2">
             <span className="inline-block rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold text-slate-950">
-              {T('Admissions', 'ምዝገባ')} {SCHOOL_INFO.registrationYear}
+              {T('Admissions', 'ምዝገባ')} {formatYear(year, lang)}
             </span>
             <h1 className="font-display text-2xl font-bold sm:text-3xl">{T('Admissions and classes', 'ምዝገባና የክፍል ምደባ')}</h1>
             <p className="text-sm leading-relaxed text-slate-300">
@@ -1231,9 +1155,9 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
           </div>
           <dl className="grid grid-cols-3 gap-3 text-center">
             {[
-              [T('Registered', 'የተመዘገቡ'), registeredStudents.length],
-              [T('In a class', 'ክፍል ያገኙ'), registeredStudents.filter((r) => r.allocatedSection).length],
-              [T('Waiting', 'በመጠበቅ ላይ'), registeredStudents.length - registeredStudents.filter((r) => r.allocatedSection).length]
+              [T('Registered', 'የተመዘገቡ'), counts.registered],
+              [T('In a class', 'ክፍል ያገኙ'), counts.inClass],
+              [T('Waiting', 'በመጠበቅ ላይ'), counts.waiting]
             ].map(([k, v]) => (
               <div key={String(k)} className="glass min-w-[88px] rounded-2xl px-4 py-3">
                 <dd className="font-mono text-2xl font-semibold tabular-nums text-white">{v}</dd>
@@ -1245,11 +1169,12 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       </section>
 
       {/* Steps */}
-      <nav aria-label="Registrar steps" className="grid grid-cols-3 gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 sm:flex sm:gap-2 sm:overflow-x-auto sm:p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav aria-label="Registrar steps" className="grid grid-cols-4 gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 sm:flex sm:gap-2 sm:overflow-x-auto sm:p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {([
-          ['registration', 1, T('Register students', 'ተማሪ መመዝገብ'), registeredStudents.length, UserPlus],
-          ['allocation', 2, T('Place in classes', 'ክፍል መመደብ'), registeredStudents.length - registeredStudents.filter((r) => r.allocatedSection).length, Shuffle],
-          ['timetable', 3, T('Timetable', 'የጊዜ ሰሌዳ'), undefined, Calendar]
+          ['registration', 1, T('Register students', 'ተማሪ መመዝገብ'), counts.registered, UserPlus],
+          ['allocation', 2, T('Place in classes', 'ክፍል መመደብ'), counts.waiting, Shuffle],
+          ['timetable', 3, T('Timetable', 'የጊዜ ሰሌዳ'), undefined, Calendar],
+          ['year', 4, T('Academic year', 'የትምህርት ዘመን'), undefined, GraduationCap]
         ] as const).map(([id, n, label, count, Icon]) => {
           const active = activeTab === id;
           return (
@@ -1290,13 +1215,13 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                   </h3>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {T(
-                      `Start typing a name. We look for the student in ${SCHOOL_INFO.previousYear} records and fill in the rest.`,
-                      `ስም መጻፍ ይጀምሩ። ተማሪውን በ${SCHOOL_INFO.previousYear} መዝገብ ውስጥ ፈልገን ቀሪውን እንሞላለን።`
+                      `Start typing a name. We look for the student in ${formatYear(previousYear(year), lang)} records and fill in the rest.`,
+                      `ስም መጻፍ ይጀምሩ። ተማሪውን በ${formatYear(previousYear(year), lang)} መዝገብ ውስጥ ፈልገን ቀሪውን እንሞላለን።`
                     )}
                   </p>
                 </div>
                 <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1 text-xs font-bold text-amber-300">
-                  {SCHOOL_INFO.registrationYear}
+                  {formatYear(year, lang)}
                 </span>
               </header>
 
@@ -1336,7 +1261,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                         <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2 text-[11px] font-semibold text-slate-500">
                           <Search className="h-3.5 w-3.5" />
                           {suggestions.length > 0
-                            ? T(`From ${SCHOOL_INFO.previousYear} records`, `ከ${SCHOOL_INFO.previousYear} መዝገብ`)
+                            ? T(`From ${formatYear(previousYear(year), lang)} records`, `ከ${formatYear(previousYear(year), lang)} መዝገብ`)
                             : T('No match in last year’s records', 'በባለፈው ዓመት መዝገብ አልተገኘም')}
                         </div>
                         {suggestions.length === 0 ? (
@@ -1535,7 +1460,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
 
                 <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-5">
                   <span className="text-xs text-slate-500">
-                    {T('Admission year', 'የምዝገባ ዓመት')}: <b className="text-slate-700">{SCHOOL_INFO.registrationYear}</b>
+                    {T('Admission year', 'የምዝገባ ዓመት')}: <b className="text-slate-700">{formatYear(year, lang)}</b>
                   </span>
                   <button type="submit" className="btn-academic flex items-center gap-2 rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white hover:bg-slate-800 cursor-pointer">
                     <CheckCircle2 className="h-4 w-4 text-amber-300" />
@@ -1576,7 +1501,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                     <UserPlus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                     <p className="text-xs font-bold text-slate-700">No Grade {targetGrade} Students Enrolled Yet</p>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Use the intake form on the left or select a {SCHOOL_INFO.previousYear} candidate above to enroll the first applicant.
+                      Use the intake form on the left or select a {formatYear(previousYear(year))} candidate above to enroll the first applicant.
                     </p>
                   </div>
                 ) : (
@@ -2215,6 +2140,20 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
       {/* =========================================================================
           TAB 3: TIMETABLE & TEACHER PERIOD CLASH PREVENTER
          ========================================================================= */}
+      {/* =========================================================================
+          TAB 4: ACADEMIC YEAR (who is on the roster, who left, start a new year, past years)
+         ========================================================================= */}
+      {activeTab === 'year' && (
+        <AcademicYearPanel
+          year={year}
+          lang={lang}
+          students={students}
+          sections={sections}
+          onUpdateStudents={onUpdateStudents}
+          onStartNewAcademicYear={onStartNewAcademicYear}
+        />
+      )}
+
       {activeTab === 'timetable' && (
         <div className="space-y-6">
           {/* Instructions banner */}
@@ -2514,7 +2453,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                    {currentEcLabel('en')} Academic Registry
+                    {formatYear(year, lang)} Academic Registry
                   </span>
                   <h3 className="text-xl font-black text-white mt-1">
                     {lang === 'am' ? 'ክፍሎች በተሳካ ሁኔታ ተመዝግበዋል!' : 'Sections Successfully Committed!'}
@@ -2528,7 +2467,7 @@ export const RegistrarAdminPage: React.FC<RegistrarAdminPageProps> = ({
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900 text-xs leading-relaxed space-y-2">
                 <p className="font-bold">
                   {lang === 'am'
-                    ? `የ${currentEcLabel('am')} ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
+                    ? `የ${formatYear(year, 'am')} ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} ክፍሎች ተፈጥረው ወደ ትምህርት ቤቱ ዋና ዳታቤዝ ተመዝግበዋል።`
                     : `Successfully recorded ${lastCommittedSectionsInfo?.count || previewBuckets?.length || 0} sections (${(lastCommittedSectionsInfo?.codes || previewBuckets?.map((b) => b.sectionCode) || []).join(', ')}) into the school active roster.`}
                 </p>
                 <p className="text-emerald-700 text-[11px]">
