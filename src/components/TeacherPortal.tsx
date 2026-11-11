@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { AttendanceTab } from './AttendanceTab';
+import { BannedBadge, banTooltip } from './BannedBadge';
+import { isBanned } from '../utils/banAndDisband';
 import { useAttendance } from '../hooks/useAttendance';
 import {
   Users,
@@ -1698,6 +1700,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                             <div className="flex items-center gap-2 flex-wrap">
                               {failing && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="Below 50%" />}
                               <span className="font-semibold text-slate-900">{student.fullName}</span>
+                              <BannedBadge student={student} />
                               {student.cteSpecialization && (
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">{student.cteSpecialization}</span>
                               )}
@@ -1758,10 +1761,13 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
           <div className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredStudents.map((student) => (
-                <div key={student.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <div key={student.id} className={`p-4 rounded-xl border space-y-3 ${isBanned(student) ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200 bg-slate-50/50'}`}>
                   <div className="flex items-start justify-between">
                     <div>
-                      <h4 className="font-bold text-slate-900 text-sm">{student.fullName}</h4>
+                      <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
+                        {student.fullName}
+                        <BannedBadge student={student} />
+                      </h4>
                       <p className="text-xs text-slate-500">{student.fullNameAmharic}</p>
                     </div>
                     <span className="font-mono text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
@@ -1770,6 +1776,11 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-600 pt-2 border-t border-slate-200/80">
+                    {isBanned(student) && (
+                      <div className="rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] text-rose-800">
+                        {banTooltip(student)}
+                      </div>
+                    )}
                     {student.cteSpecialization && (
                       <div className="flex items-center justify-between">
                         <span className="text-slate-500">CTE Elective:</span>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Cloud, CloudOff, Download, Users } from 'lucide-react';
 import { Student } from '../data/schoolData';
+import { BannedBadge } from './BannedBadge';
 import {
   AttendanceApi,
   AttendanceStatus,
@@ -160,7 +161,10 @@ export const AttendanceTab: React.FC<Props> = ({ students, section, att }) => {
                   <span className="w-6 text-right text-xs text-slate-400 font-mono">{i + 1}</span>
                   <span className="avatar-monogram w-9 h-9 rounded-full text-xs shrink-0">{s.fullName.split(' ').map((n) => n[0]).slice(0, 2).join('')}</span>
                   <div className="min-w-0 flex-1 basis-40">
-                    <div className="font-semibold text-slate-900 text-sm truncate">{s.fullName}</div>
+                    <div className="font-semibold text-slate-900 text-sm flex items-center gap-2 min-w-0">
+                      <span className="truncate">{s.fullName}</span>
+                      <BannedBadge student={s} />
+                    </div>
                     <div className="text-[11px] text-slate-500 font-mono">{s.studentId}</div>
                   </div>
                   <div role="radiogroup" aria-label={`Attendance for ${s.fullName}`} className="inline-flex gap-1 rounded-xl bg-slate-100 p-1">
@@ -240,7 +244,10 @@ export const AttendanceTab: React.FC<Props> = ({ students, section, att }) => {
                 return (
                   <tr key={s.id} className="group">
                     <td className="bg-white group-hover:bg-slate-50 border-b border-slate-100 py-1 px-2 sm:px-3">
-                      <div className="font-semibold text-slate-900 truncate">{s.fullName}</div>
+                      <div className="font-semibold text-slate-900 flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{s.fullName}</span>
+                        <BannedBadge student={s} />
+                      </div>
                       <div className="text-[10px] text-slate-400 font-mono truncate">{s.studentId}</div>
                     </td>
                     {histDays.map((d, i) => {
