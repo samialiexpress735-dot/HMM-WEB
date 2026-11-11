@@ -26,6 +26,12 @@ export interface Student {
   status?: 'active' | 'inactive';
   leftDate?: string; // ISO date
   leftReason?: string;
+  /** Banned by the administrator. The student keeps their class and marks but is blocked from the public grade portal. */
+  banned?: boolean;
+  bannedDate?: string; // ISO date the ban started
+  /** ISO date the ban ends (inclusive of the day before). Empty = no end date, until an administrator lifts it. */
+  bannedUntil?: string;
+  bannedReason?: string;
   /** Link to the admission record this student was created from (no cascade: deleting one never deletes the other). */
   registrationId?: string;
   academicYear: string; // E.C. year as digits, e.g. '2019'

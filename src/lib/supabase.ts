@@ -625,6 +625,33 @@ export async function syncSectionToCloud(section: GradeSection): Promise<boolean
   }
 }
 
+/**
+ * Removes a class from the database (used when the administrator disbands it). Students are NOT deleted here:
+ * they are released to the waiting list by the caller and saved as ordinary student updates.
+ */
+export async function deleteSectionFromCloud(sectionId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('grade_sections').delete().eq('id', sectionId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/** Removes a class's timetable periods for one academic year, so its teachers' periods are free again. */
+export async function deleteTimetableSlotsForSectionInCloud(sectionCode: string, year: string = getAcademicYear()): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('timetable_slots').delete().eq('section_code', sectionCode).eq('academic_year', year);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 // ==============================================================================
 // 4. REGISTRATIONS (2019 E.C.) CLOUD SYNC
 // ==============================================================================
@@ -827,6 +854,10 @@ export async function fetchStudentsFromCloud(
         status: s.status === 'inactive' ? 'inactive' : 'active',
         leftDate: s.left_date || undefined,
         leftReason: s.left_reason || undefined,
+        banned: Boolean(s.banned) || undefined,
+        bannedDate: s.banned_date || undefined,
+        bannedUntil: s.banned_until || undefined,
+        bannedReason: s.banned_reason || undefined,
         registrationId: s.registration_id || undefined,
         academicYear: yearDigits(s.academic_year, year),
         rank: Number(s.rank || 0),
@@ -879,6 +910,8 @@ export function getFailedStudentIds(): Set<string> {
 
 // Set once if the database has no custom_assessments column yet (supabase/add_custom_assessments.sql)
 let customMarksColumnMissing = false;
+// Set once if the database has no ban columns yet (supabase/add_student_bans.sql)
+let banColumnsMissing = false;
 
 export async function syncActiveStudentToCloud(student: Student): Promise<boolean> {
   const ticket = ++studentPushSeq;
@@ -899,7 +932,7 @@ async function pushStudentToCloud(student: Student): Promise<boolean> {
     const year = yearDigits(student.academicYear, getAcademicYear());
 
     // 1. The student's row for this year
-    const { error: sErr } = await client.from('students').upsert({
+    const baseRow = {
       id: student.id,
       student_id: student.studentId,
       full_name: student.fullName,
@@ -925,7 +958,22 @@ async function pushStudentToCloud(student: Student): Promise<boolean> {
       guardian_phone: student.guardianPhone,
       avatar: student.avatar || '',
       created_at: new Date().toISOString()
-    });
+    };
+    const banColumns = {
+      banned: Boolean(student.banned),
+      banned_date: student.banned ? student.bannedDate || null : null,
+      banned_until: student.banned ? student.bannedUntil || null : null,
+      banned_reason: student.banned ? student.bannedReason || null : null
+    };
+
+    // The ban columns do not exist until supabase/add_student_bans.sql has been run. Until then, save everything
+    // else so nothing is lost. The ban itself is not saved, so it is lost on the next reload from the database.
+    let { error: sErr } = await client.from('students').upsert(banColumnsMissing ? baseRow : { ...baseRow, ...banColumns });
+    if (sErr && !banColumnsMissing && /banned/i.test(sErr.message || '')) {
+      banColumnsMissing = true;
+      console.warn('Ban columns missing: run supabase/add_student_bans.sql. Saved without the ban.');
+      ({ error: sErr } = await client.from('students').upsert(baseRow));
+    }
 
     if (sErr) {
       console.warn('Student upsert error:', sErr);

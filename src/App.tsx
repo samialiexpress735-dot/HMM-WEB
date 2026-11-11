@@ -15,6 +15,7 @@ import { MessagingBoard } from './components/MessagingBoard';
 import { AboutAndCampus } from './components/AboutAndCampus';
 import { GradesOfYearPage } from './components/GradesOfYearPage';
 import { RegistrarAdminPage } from './components/RegistrarAdminPage';
+import { AdminDisciplinePage } from './components/AdminDisciplinePage';
 import { AdminSignupPage, AdminUser } from './components/AdminSignupPage';
 import { TeacherLoginModal } from './components/TeacherLoginModal';
 import { Footer } from './components/Footer';
@@ -38,6 +39,8 @@ import {
   deleteTeacherFromCloud,
   fetchSectionsFromCloud,
   syncSectionToCloud,
+  deleteSectionFromCloud,
+  deleteTimetableSlotsForSectionInCloud,
   fetchStudentsFromCloud,
   syncActiveStudentToCloud,
   fetchCurrentAcademicYear,
@@ -50,6 +53,7 @@ import {
 import { useAcademicYear, getAcademicYear, setAcademicYear, previousYear, yearDigits } from './utils/academicYear';
 import { isOnRoster, deriveSectionCode, mergeRosterUpdate, stampNewStudents as stampNew } from './utils/rosterView';
 import { getSectionsAssignedToTeacher, findSectionsWithStaleCounts } from './utils/sectionUtils';
+import { banStudent, unbanStudent, disbandSection, isBanned } from './utils/banAndDisband';
 
 export default function App() {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
@@ -120,6 +124,8 @@ export default function App() {
   });
   // What the portals see: students who are in a class and still at the school.
   const students = useMemo(() => allStudents.filter(isOnRoster), [allStudents]);
+  // Banned students cannot be looked up in the public grade portal.
+  const portalStudents = useMemo(() => students.filter((st) => !isBanned(st)), [students]);
 
   const allStudentsRef = useRef(allStudents);
   allStudentsRef.current = allStudents;
@@ -269,7 +275,7 @@ export default function App() {
 
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
-    if (tabParam && ['home', 'teacher', 'admin', 'grades', 'registrar', 'portal', 'calendar', 'messaging', 'esslce', 'about'].includes(tabParam)) {
+    if (tabParam && ['home', 'teacher', 'admin', 'grades', 'registrar', 'discipline', 'portal', 'calendar', 'messaging', 'esslce', 'about'].includes(tabParam)) {
       setCurrentTab(tabParam);
     }
 
@@ -558,6 +564,63 @@ export default function App() {
     return true;
   };
 
+  // ----- Administrator discipline tools -----
+  const handleBanStudent = (studentId: string, opts: { reason: string; until?: string }) => {
+    handleUpdateAllStudents((prev) => prev.map((st) => (st.id === studentId ? banStudent(st, opts) : st)));
+  };
+
+  const handleUnbanStudent = (studentId: string) => {
+    handleUpdateAllStudents((prev) => prev.map((st) => (st.id === studentId ? unbanStudent(st) : st)));
+  };
+
+  /**
+   * Disbands a class: its students are released (to the waiting list, marks kept; for a CTE group only the group is
+   * cleared), the class and its timetable periods are removed, and teachers lose the assignment.
+   * Resolves to false if the database could not be updated.
+   */
+  const handleDisbandSection = async (section: GradeSection): Promise<boolean> => {
+    handleUpdateAllStudents((prev) => disbandSection(prev, section).students);
+
+    setSections((prev) => {
+      const nextSections = prev.filter((s) => s.id !== section.id);
+      setTeachers((prevTeachers) =>
+        prevTeachers.map((t) => ({ ...t, sectionsTeaching: getSectionsAssignedToTeacher(t, nextSections) }))
+      );
+      setTeacherUser((prevTeacher) => {
+        if (!prevTeacher) return null;
+        const refreshed = { ...prevTeacher, sectionsTeaching: getSectionsAssignedToTeacher(prevTeacher, nextSections) };
+        try {
+          localStorage.setItem('hmm_teacher_user', JSON.stringify(refreshed));
+        } catch {
+          // ignore
+        }
+        return refreshed;
+      });
+      return nextSections;
+    });
+
+    // The registrar's saved timetable still lists this class; drop its periods so the teachers are free again.
+    try {
+      const saved = localStorage.getItem('hmm_persisted_timetable_slots');
+      if (saved) {
+        const slots = JSON.parse(saved) as { sectionCode: string }[];
+        localStorage.setItem(
+          'hmm_persisted_timetable_slots',
+          JSON.stringify(slots.filter((sl) => sl.sectionCode !== section.section))
+        );
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!isSupabaseConfigured()) return true;
+    const [sectionGone, slotsGone] = await Promise.all([
+      deleteSectionFromCloud(section.id),
+      deleteTimetableSlotsForSectionInCloud(section.section)
+    ]);
+    return sectionGone && slotsGone;
+  };
+
   const handleNavigateToTeacherPortal = (sectionCode?: string, subjectId?: string) => {
     if (sectionCode) setActiveTeacherSection(sectionCode);
     if (subjectId) setActiveTeacherSubject(subjectId);
@@ -566,7 +629,7 @@ export default function App() {
 
   const isDedicatedWorkspace =
     (Boolean(teacherUser) && currentTab === 'teacher') ||
-    (Boolean(adminUser) && ['admin', 'registrar', 'grades'].includes(currentTab));
+    (Boolean(adminUser) && ['admin', 'registrar', 'grades', 'discipline'].includes(currentTab));
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-emerald-600 selection:text-white w-full max-w-full overflow-x-hidden">
@@ -609,6 +672,7 @@ export default function App() {
               adminUser={adminUser}
               onNavigateToGrades={() => setCurrentTab('grades')}
               onNavigateToRegistrar={() => setCurrentTab('registrar')}
+              onNavigateToDiscipline={() => setCurrentTab('discipline')}
               onNavigateHome={() => {
                 setPortalMode('public');
                 setCurrentTab('home');
@@ -671,6 +735,37 @@ export default function App() {
           )
         )}
 
+        {currentTab === 'discipline' && (
+          adminUser ? (
+            <AdminDisciplinePage
+              students={allStudents}
+              sections={sections}
+              lang={lang}
+              onBanStudent={handleBanStudent}
+              onUnbanStudent={handleUnbanStudent}
+              onDisbandSection={handleDisbandSection}
+              onNavigateToAdmin={() => setCurrentTab('admin')}
+              onNavigateToRegistrar={() => setCurrentTab('registrar')}
+              onNavigateToGrades={() => setCurrentTab('grades')}
+              onNavigateHome={() => {
+                setPortalMode('public');
+                setCurrentTab('home');
+              }}
+              onSignOutAdmin={handleSignOutAdmin}
+            />
+          ) : (
+            <AdminSignupPage
+              onAdminAuthenticated={handleAdminAuthenticated}
+              onPreviewPublicSite={() => {
+                setPortalMode('public');
+                setCurrentTab('home');
+              }}
+              lang={lang}
+              setLang={setLang}
+            />
+          )
+        )}
+
         {currentTab === 'grades' && (
           <GradesOfYearPage
             sections={sections}
@@ -727,7 +822,7 @@ export default function App() {
 
         {currentTab === 'portal' && (
           <StudentGradePortal
-            students={students}
+            students={portalStudents}
             lang={lang}
             initialSearchQuery={portalSearchQuery}
           />

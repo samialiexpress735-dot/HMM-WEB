@@ -65,6 +65,7 @@ interface AdminPortalProps {
   adminUser?: AdminUser | null;
   onNavigateToGrades?: () => void;
   onNavigateToRegistrar?: () => void;
+  onNavigateToDiscipline?: () => void;
   onNavigateHome?: () => void;
   onSignOut?: () => void;
 }
@@ -84,6 +85,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   adminUser,
   onNavigateToGrades,
   onNavigateToRegistrar,
+  onNavigateToDiscipline,
   onNavigateHome,
   onSignOut
 }) => {
@@ -466,6 +468,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             >
               <Layers className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
               <span className="truncate">{lang === 'am' ? 'ክፍሎችና ሴክሽኖች →' : <>Classes<span className="hidden min-[420px]:inline"> & Sections</span> →</>}</span>
+            </button>
+          )}
+          {onNavigateToDiscipline && (
+            <button
+              onClick={onNavigateToDiscipline}
+              className="min-w-0 flex-1 sm:flex-none justify-center px-3.5 py-2.5 sm:py-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 border border-rose-400/20 text-xs font-bold rounded-full flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-300 shrink-0" />
+              <span className="truncate">{lang === 'am' ? 'ዲሲፕሊን →' : 'Discipline →'}</span>
             </button>
           )}
         </div>
