@@ -256,12 +256,32 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
           }
         }
       } catch {}
+      // Nothing saved on this device (e.g. another device or browser): use the columns saved with the students' marks.
+      for (const st of sectionStudents) {
+        const sem = st.semesters.find((x) => x.semester === selectedSemester);
+        const sub = sem?.subjects.find((x) => x.subjectId === selectedSubjectId && x.assessmentColumns?.length);
+        if (sub?.assessmentColumns) {
+          setAssessmentColumns(sub.assessmentColumns as AssessmentColumn[]);
+          return;
+        }
+      }
       setAssessmentColumns(DEFAULT_ASSESSMENT_COLUMNS);
     }
   }, [selectedSection, selectedSubjectId, selectedSemester]);
 
   const saveAssessmentColumns = (newCols: AssessmentColumn[]) => {
     setAssessmentColumns(newCols);
+    // Students who already have marks for this subject are re-saved with the new columns, so the Open Section page and
+    // the report cards follow the teacher's columns straight away (not only after the next mark is typed).
+    const inClass = new Set(sectionStudents.map((x) => x.id));
+    onUpdateStudents((prev) =>
+      prev.map((st) => {
+        if (!inClass.has(st.id)) return st;
+        const sem = st.semesters.find((x) => x.semester === selectedSemester);
+        if (!sem?.subjects.some((x) => subjectMatches(x.subjectId))) return st;
+        return applyMarksToStudent(st, newCols);
+      })
+    );
     if (selectedSection && selectedSubjectId) {
       const storageKey = `hmm_teacher_assessment_cols_${selectedSection}_${selectedSubjectId}_sem${selectedSemester}`;
       try {
@@ -854,6 +874,79 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
     };
   };
 
+  const subjectMatches = (subjectId: string) =>
+    subjectId === selectedSubjectId ||
+    (selectedSubjectId === 'it' && subjectId === 'ict') ||
+    (selectedSubjectId === 'ict' && subjectId === 'it');
+
+  /**
+   * Saves a student's marks for the open subject/semester: the per-column marks, the teacher's column definitions
+   * (name, maximum, bonus), and the school summary (Assessment 30 / Mid 20 / Final 50) worked out from the percentage.
+   * Pass colId + value to change one mark; leave them out to re-save after the columns themselves changed.
+   */
+  const applyMarksToStudent = (st: Student, cols: AssessmentColumn[], colId?: string, value?: number): Student => {
+    const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
+    const existingSubject = semesterData?.subjects.find((s) => subjectMatches(s.subjectId));
+
+    // Freeze what every column currently shows BEFORE the summary totals are rewritten below.
+    // Columns that were never typed into read their value back from those totals, so without this
+    // snapshot editing one cell silently changed the others.
+    const existingCustom = (existingSubject as any)?.customAssessments || {};
+    const frozen: Record<string, number> = {};
+    cols.forEach((c) => {
+      // A mark can never be above its column's maximum (the maximum may have just been lowered)
+      frozen[c.id] = Math.max(0, Math.min(c.maxScore, getStudentColumnScore(st, c.id)));
+    });
+    const updatedCustom: Record<string, number> = { ...existingCustom, ...frozen };
+    if (colId !== undefined && value !== undefined) updatedCustom[colId] = value;
+    try {
+      localStorage.setItem(`hmm_marks_${st.id}_sem${selectedSemester}_${selectedSubjectId}`, JSON.stringify(updatedCustom));
+    } catch {}
+
+    const regularCols = cols.filter((c) => !c.isBonus);
+    const bonusCols = cols.filter((c) => c.isBonus);
+    const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
+
+    const totalEarned = [...regularCols, ...bonusCols].reduce((sum, c) => sum + (updatedCustom[c.id] ?? 0), 0);
+    const percentage = maxPossible > 0 ? (totalEarned / maxPossible) * 100 : totalEarned;
+
+    const continuousScore = Math.min(30, Math.round((percentage * 0.3) * 10) / 10);
+    const midScore = Math.min(20, Math.round((percentage * 0.2) * 10) / 10);
+    const finalScore = Math.min(50, Math.round((percentage * 0.5) * 10) / 10);
+    const columnDefs = cols.map((c) => ({ id: c.id, name: c.name, maxScore: c.maxScore, ...(c.isBonus ? { isBonus: true } : {}) }));
+
+    let newSubjects;
+    if (existingSubject) {
+      newSubjects = semesterData.subjects.map((sub) =>
+        sub.subjectId === existingSubject.subjectId
+          ? { ...sub, continuousAssessment: continuousScore, midExam: midScore, finalExam: finalScore, customAssessments: updatedCustom, assessmentColumns: columnDefs }
+          : sub
+      );
+    } else {
+      newSubjects = [
+        ...(semesterData?.subjects || []),
+        {
+          subjectId: selectedSubjectId,
+          subjectName: currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase(),
+          subjectAmharic: currentSubjectObj?.subjectAmharic || selectedSubjectId.toUpperCase(),
+          teacherName: activeTeacherUser?.name || 'Subject Teacher',
+          continuousAssessment: continuousScore,
+          midExam: midScore,
+          finalExam: finalScore,
+          customAssessments: updatedCustom,
+          assessmentColumns: columnDefs
+        }
+      ];
+    }
+
+    const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
+    const updatedSemesters = hasSemester
+      ? st.semesters.map((sem) => (sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem))
+      : [...st.semesters, { semester: selectedSemester, subjects: newSubjects }];
+
+    return { ...st, semesters: updatedSemesters };
+  };
+
   // Customizable Mark Score Change Handler
   const handleCustomScoreChange = (studentId: string, colId: string, rawVal: number) => {
     const col = assessmentColumns.find((c) => c.id === colId);
@@ -866,75 +959,7 @@ const TeacherPortalInner: React.FC<TeacherPortalProps> = ({
     } catch {}
 
     // Functional update: always builds on the latest student list, so two quick edits can never overwrite each other.
-    onUpdateStudents((prev) => prev.map((st) => {
-      if (st.id !== studentId) return st;
-
-      const semesterData = st.semesters.find((sem) => sem.semester === selectedSemester) || st.semesters[0];
-      const existingSubject = semesterData?.subjects.find(
-        (s) =>
-          s.subjectId === selectedSubjectId ||
-          (selectedSubjectId === 'it' && s.subjectId === 'ict') ||
-          (selectedSubjectId === 'ict' && s.subjectId === 'it')
-      );
-
-      // FIX: freeze what every column currently shows BEFORE the summary totals are rewritten below.
-      // Columns that were never typed into read their value back from those totals, so without this
-      // snapshot editing one cell silently changed the others.
-      const existingCustom = (existingSubject as any)?.customAssessments || {};
-      const frozen: Record<string, number> = {};
-      assessmentColumns.forEach((c) => { frozen[c.id] = getStudentColumnScore(st, c.id); });
-      const updatedCustom: Record<string, number> = { ...existingCustom, ...frozen, [colId]: clamped };
-      try {
-        localStorage.setItem(`hmm_marks_${st.id}_sem${selectedSemester}_${selectedSubjectId}`, JSON.stringify(updatedCustom));
-      } catch {}
-
-      const regularCols = assessmentColumns.filter((c) => !c.isBonus);
-      const bonusCols = assessmentColumns.filter((c) => c.isBonus);
-      const maxPossible = regularCols.reduce((sum, c) => sum + c.maxScore, 0) || 100;
-
-      const totalEarned = [...regularCols, ...bonusCols].reduce((sum, c) => sum + (updatedCustom[c.id] ?? 0), 0);
-      const percentage = maxPossible > 0 ? (totalEarned / maxPossible) * 100 : totalEarned;
-
-      const continuousScore = Math.min(30, Math.round((percentage * 0.3) * 10) / 10);
-      const midScore = Math.min(20, Math.round((percentage * 0.2) * 10) / 10);
-      const finalScore = Math.min(50, Math.round((percentage * 0.5) * 10) / 10);
-
-      let newSubjects;
-      if (existingSubject) {
-        newSubjects = semesterData.subjects.map((sub) =>
-          sub.subjectId === existingSubject.subjectId
-            ? {
-                ...sub,
-                continuousAssessment: continuousScore,
-                midExam: midScore,
-                finalExam: finalScore,
-                customAssessments: updatedCustom
-              }
-            : sub
-        );
-      } else {
-        newSubjects = [
-          ...(semesterData?.subjects || []),
-          {
-            subjectId: selectedSubjectId,
-            subjectName: currentSubjectObj?.subjectName || selectedSubjectId.toUpperCase(),
-            subjectAmharic: currentSubjectObj?.subjectAmharic || selectedSubjectId.toUpperCase(),
-            teacherName: activeTeacherUser?.name || 'Subject Teacher',
-            continuousAssessment: continuousScore,
-            midExam: midScore,
-            finalExam: finalScore,
-            customAssessments: updatedCustom
-          }
-        ];
-      }
-
-      const hasSemester = st.semesters.some((sem) => sem.semester === selectedSemester);
-      const updatedSemesters = hasSemester
-        ? st.semesters.map((sem) => (sem.semester === selectedSemester ? { ...sem, subjects: newSubjects } : sem))
-        : [...st.semesters, { semester: selectedSemester, subjects: newSubjects }];
-
-      return { ...st, semesters: updatedSemesters };
-    }));
+    onUpdateStudents((prev) => prev.map((st) => (st.id !== studentId ? st : applyMarksToStudent(st, assessmentColumns, colId, clamped))));
   };
 
   // Attendance: saved on this device first, then synced to Supabase (see hooks/useAttendance.ts)

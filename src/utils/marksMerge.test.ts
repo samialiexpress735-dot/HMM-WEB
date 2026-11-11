@@ -39,3 +39,10 @@ test('students that only exist in the cloud are added; local-only ones are dropp
   const out = mergeCloudStudents([mk()], cloud, new Map());
   assert.deepEqual(out.map((s) => s.id), ['s2']);
 });
+
+test('the teacher column definitions travel with the per-column marks when the cloud copy has neither', () => {
+  const cols = [{ id: 'quiz1', name: 'Quiz', maxScore: 10 }];
+  const local = [mk({ customAssessments: { quiz1: 8 }, assessmentColumns: cols })];
+  const out = mergeCloudStudents(local, [mk()], new Map());
+  assert.deepEqual(out[0].semesters[0].subjects[0].assessmentColumns, cols);
+});

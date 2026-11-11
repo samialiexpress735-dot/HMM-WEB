@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getSubjectBreakdown } from '../utils/assessmentColumns';
 import {
   Layers,
   Users,
@@ -32,7 +33,7 @@ import {
   UserPlus
 } from 'lucide-react';
 import { GradeSection, Teacher, Student, SectionSubjectAssignment } from '../data/schoolData';
-import { calculateTotalScore, getEthiopianLetterGrade } from '../utils/gradeCalculations';
+import { getEthiopianLetterGrade } from '../utils/gradeCalculations';
 import { getStudentsForSection as getStudentsForSectionUtil, getSectionHeadcount } from '../utils/sectionUtils';
 import { getSectionCapacity } from '../utils/sectionCapacity';
 import { currentEcLabel } from '../utils/ethiopianCalendar';
@@ -1110,7 +1111,8 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
         const avgOf = (st: Student): number | null => {
           const subs = deskSubjects(st);
           if (!subs.length) return null;
-          const t = subs.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
+          // Each subject's percentage of what it is really out of (a teacher may use a single column out of 10)
+          const t = subs.reduce((a, x) => a + getSubjectBreakdown(x).percentage, 0);
           return Math.round((t / subs.length) * 10) / 10;
         };
         const closeDesk = () => { setRosterModalSection(null); setSelectedStudentForMarks(null); setDeskQuery(''); };
@@ -1127,8 +1129,11 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
         const live = selectedStudentForMarks ? roster.find((x) => x.id === selectedStudentForMarks.id) || selectedStudentForMarks : null;
         const liveSubjects = live ? deskSubjects(live) : [];
         const liveAvg = live ? avgOf(live) : null;
-        const liveTotal = liveSubjects.reduce((a, x) => a + calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam), 0);
-        const passed = liveSubjects.filter((x) => calculateTotalScore(x.continuousAssessment, x.midExam, x.finalExam) >= 50).length;
+        const liveBreakdowns = liveSubjects.map((x) => getSubjectBreakdown(x));
+        const liveTotal = liveBreakdowns.reduce((a, b) => a + b.earned, 0);
+        const liveMax = liveBreakdowns.reduce((a, b) => a + b.max, 0);
+        const passed = liveBreakdowns.filter((b) => b.percentage >= 50).length;
+        const anyCustom = liveBreakdowns.some((b) => b.custom);
         const medal = (r?: number) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : '');
 
         return (
@@ -1243,7 +1248,7 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                       </div>
                       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                         {[
-                          { k: 'Total', v: `${Math.round(liveTotal * 10) / 10}/${liveSubjects.length * 100}` },
+                          { k: 'Total', v: `${Math.round(liveTotal * 10) / 10}/${liveMax}` },
                           { k: 'Average', v: liveAvg !== null ? `${liveAvg}%` : '–' },
                           { k: 'Passed', v: `${passed}/${liveSubjects.length}` }
                         ].map((c) => (
@@ -1256,7 +1261,9 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                     </div>
 
                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-[11px] text-slate-500 flex items-center justify-between gap-2">
-                      <span className="font-semibold text-slate-700">Semester 1 · Assessment 30 + Mid 20 + Final 50 = 100</span>
+                      <span className="font-semibold text-slate-700">
+                        {anyCustom ? 'Semester 1 · Marks exactly as each teacher entered them' : 'Semester 1 · Assessment 30 + Mid 20 + Final 50 = 100'}
+                      </span>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200/70 text-slate-600 font-bold"><ShieldCheck className="w-3 h-3" /> View only</span>
                     </div>
 
@@ -1265,39 +1272,43 @@ export const GradesOfYearPage: React.FC<GradesOfYearPageProps> = ({
                         <thead>
                           <tr className="text-slate-600">
                             <th className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 text-left py-2.5 px-4 font-semibold min-w-[150px]">Subject</th>
-                            {[['Assess', 30], ['Mid', 20], ['Final', 50]].map(([n, m]) => (
-                              <th key={n as string} className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 py-2 px-1 text-center font-semibold">
-                                {n}<span className="block text-[10px] font-mono text-slate-400 font-normal">out of {m}</span>
-                              </th>
-                            ))}
+                            <th className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 py-2.5 px-2 text-left font-semibold min-w-[180px]">
+                              Marks
+                            </th>
                             <th className="sticky top-0 z-10 bg-slate-100 border-b border-slate-200 py-2.5 px-3 text-center font-semibold min-w-[110px]">Total</th>
                           </tr>
                         </thead>
                         <tbody>
                           {liveSubjects.map((sub) => {
-                            const total = calculateTotalScore(sub.continuousAssessment, sub.midExam, sub.finalExam);
-                            const letter = getEthiopianLetterGrade(total).letter;
+                            const bd = getSubjectBreakdown(sub);
+                            const pct = bd.percentage;
+                            const letter = getEthiopianLetterGrade(pct).letter;
                             const tone = gradeTone(letter);
-                            const cells: ('continuousAssessment' | 'midExam' | 'finalExam')[] = ['continuousAssessment', 'midExam', 'finalExam'];
                             return (
                               <tr key={sub.subjectId} className="group">
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-4">
                                   <div className="font-bold text-slate-900 truncate max-w-[200px]">{sub.subjectName}</div>
                                   <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{sub.subjectAmharic} · {sub.teacherName}</div>
                                 </td>
-                                {cells.map((field) => (
-                                  <td key={field} className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-1 text-center">
-                                    <span className="inline-block w-14 text-center font-mono text-sm font-semibold text-slate-800 tabular-nums">
-                                      {sub[field] ? Math.round(sub[field] * 10) / 10 : <span className="text-slate-300">–</span>}
-                                    </span>
-                                  </td>
-                                ))}
+                                <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-2">
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {bd.columns.map((c) => (
+                                      <span key={c.id} className="inline-flex items-baseline gap-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] text-slate-600" title={`${c.name}: ${c.score} out of ${c.max}${c.isBonus ? ' (bonus)' : ''}`}>
+                                        <span className="max-w-[110px] truncate">{c.name}{c.isBonus ? ' (bonus)' : ''}</span>
+                                        <span className="font-mono text-sm font-semibold text-slate-900 tabular-nums">{c.score || <span className="text-slate-300">–</span>}</span>
+                                        <span className="font-mono text-[10px] text-slate-400">/{c.max}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
                                 <td className="border-b border-slate-100 group-hover:bg-slate-50 py-2 px-3">
                                   <div className="flex items-center justify-center gap-2">
                                     <div className="flex flex-col items-center gap-1">
-                                      <span className="font-mono font-bold text-sm tabular-nums text-slate-900">{total}</span>
+                                      <span className="font-mono font-bold text-sm tabular-nums text-slate-900" title={`${pct}%`}>
+                                        {bd.earned}<span className="text-[10px] font-normal text-slate-400">/{bd.max}</span>
+                                      </span>
                                       <span className="h-1 w-14 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true">
-                                        <span className={`block h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, total)}%` }} />
+                                        <span className={`block h-full rounded-full ${tone.bar}`} style={{ width: `${Math.min(100, pct)}%` }} />
                                       </span>
                                     </div>
                                     <span className={`inline-block min-w-9 text-center px-2 py-1 rounded-lg font-mono font-bold text-[11px] ${tone.chip}`}>{letter}</span>

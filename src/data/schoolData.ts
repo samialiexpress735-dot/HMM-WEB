@@ -4,6 +4,14 @@ import { currentEcYear, ethiopianToIso } from '../utils/ethiopianCalendar';
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/** One column of a teacher's gradebook, e.g. { id: 'quiz1', name: 'Quiz', maxScore: 10 }. */
+export interface AssessmentColumnDef {
+  id: string;
+  name: string;
+  maxScore: number;
+  isBonus?: boolean;
+}
+
 export interface Student {
   id: string;
   studentId: string; // e.g. HMM-2024-0901
@@ -56,6 +64,11 @@ export interface Student {
       finalExam: number;            // /50
       /** Per-column marks typed in the teacher gradebook (the single source of truth when present). */
       customAssessments?: Record<string, number>;
+      /**
+       * The columns the teacher set up for this subject (name, maximum, bonus), saved WITH the marks so every page
+       * (e.g. the Open Section desk) shows the real scores such as 8 / 10 instead of the rescaled 30 / 20 / 50 summary.
+       */
+      assessmentColumns?: AssessmentColumnDef[];
     }[];
   }[];
 }

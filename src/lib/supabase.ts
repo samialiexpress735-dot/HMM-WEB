@@ -4,6 +4,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { packCustomAssessments, unpackCustomAssessments } from '../utils/assessmentColumns';
 import { RegisteredStudent2019, TimetableSlot } from '../utils/registrationAndTimetable';
 import { GradeSection, Teacher, Student } from '../data/schoolData';
 import { AdminUser } from '../components/AdminSignupPage';
@@ -826,7 +827,8 @@ export async function fetchStudentsFromCloud(
           continuousAssessment: Number(m.continuous_assessment || 0),
           midExam: Number(m.mid_exam || 0),
           finalExam: Number(m.final_exam || 0),
-          customAssessments: m.custom_assessments && typeof m.custom_assessments === 'object' ? m.custom_assessments : undefined
+          // The per-column marks and the teacher's column definitions (names, maximums) travel in the same JSON column
+          ...unpackCustomAssessments(m.custom_assessments)
         });
       });
     }
@@ -993,7 +995,7 @@ async function pushStudentToCloud(student: Student): Promise<boolean> {
           continuous_assessment: sub.continuousAssessment,
           mid_exam: sub.midExam,
           final_exam: sub.finalExam,
-          custom_assessments: sub.customAssessments ?? null,
+          custom_assessments: packCustomAssessments(sub),
           updated_at: new Date().toISOString()
         });
       });

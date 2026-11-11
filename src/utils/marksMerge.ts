@@ -42,7 +42,8 @@ export function mergeCloudStudents(
             continuousAssessment: lsub.continuousAssessment,
             midExam: lsub.midExam,
             finalExam: lsub.finalExam,
-            customAssessments: lsub.customAssessments
+            customAssessments: lsub.customAssessments,
+            assessmentColumns: lsub.assessmentColumns
           };
         })
       };
