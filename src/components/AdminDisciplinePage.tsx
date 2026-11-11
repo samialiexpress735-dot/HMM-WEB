@@ -4,6 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
   Ban,
@@ -446,9 +447,9 @@ export const AdminDisciplinePage: React.FC<AdminDisciplinePageProps> = ({
       )}
 
       {/* ===================== BAN MODAL ===================== */}
-      {banTarget && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label={T('Ban student', 'ተማሪ ማገድ')}>
-          <div className="w-full max-w-md space-y-4 rounded-3xl bg-white p-5 shadow-xl">
+      {banTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-label={T('Ban student', 'ተማሪ ማገድ')}>
+          <div className="my-auto max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-3xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">{T('Ban student', 'ተማሪ ማገድ')}</h2>
@@ -501,13 +502,14 @@ export const AdminDisciplinePage: React.FC<AdminDisciplinePageProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ===================== DISBAND MODAL ===================== */}
-      {disbandTarget && disbandSummary && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-3 sm:items-center" role="dialog" aria-modal="true" aria-label={T('Disband class', 'ክፍል መበተን')}>
-          <div className="w-full max-w-md space-y-4 rounded-3xl bg-white p-5 shadow-xl">
+      {disbandTarget && disbandSummary && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-label={T('Disband class', 'ክፍል መበተን')}>
+          <div className="my-auto max-h-[92vh] w-full max-w-md space-y-4 overflow-y-auto rounded-3xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
@@ -563,7 +565,8 @@ export const AdminDisciplinePage: React.FC<AdminDisciplinePageProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
